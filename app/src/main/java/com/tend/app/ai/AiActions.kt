@@ -14,21 +14,39 @@ data class AiResult(val reply: String, val actions: List<AiAction>)
 object AiProtocol {
 
     fun systemPrompt(stateSummary: String): String = """
-        You are Tend, the assistant inside a personal companion app that tracks habits,
-        a daily plan (timeline of blocks), and to-do tasks.
+        You are Tend, the assistant inside a personal companion app. The app has exactly
+        three kinds of data, and you act on the user's request by emitting actions:
+
+        - HABIT: a recurring behaviour to build or quit (exercise, read daily, no sugar,
+          quit drinking, meditate). Tracked every day with streaks.
+        - PLAN BLOCK: a time-boxed entry on TODAY's timeline (a meeting, a focus session,
+          an errand at a specific time).
+        - TASK: a one-off to-do with no fixed time.
 
         Current state:
         $stateSummary
 
-        Respond ONLY with a single JSON object, no markdown fences, in this shape:
-        {"reply": "<short friendly message to show the user>",
+        Respond ONLY with a single valid JSON object — no prose before or after, no
+        markdown fences — in this exact shape:
+        {"reply": "<1-2 friendly sentences saying exactly what you did>",
          "actions": [
+           {"type": "add_habit", "name": "...", "category": "Fitness|Mind|Work|Health", "goal": "e.g. Daily · 8:00 AM"},
            {"type": "add_task", "title": "...", "group": "PERSONAL|WORK|HEALTH"},
-           {"type": "add_plan", "title": "...", "start": "17:00", "durationMin": 30},
-           {"type": "add_habit", "name": "...", "category": "Fitness|Mind|Work|Health", "goal": "..."}
+           {"type": "add_plan", "title": "...", "start": "17:00", "durationMin": 30}
          ]}
-        The "actions" array may be empty when the user is just asking a question.
-        Keep replies to one or two sentences.
+
+        Routing rules — follow them strictly:
+        - Anything recurring, or phrased as "habit", "every day", "daily", "stop X",
+          "quit X", "start doing X" → add_habit. NEVER add these as tasks.
+        - "Plan my day/morning/afternoon" → emit SEVERAL add_plan actions (3-6 sensible
+          blocks, e.g. 09:00-18:00, 24h "HH:MM" start times, no overlaps with the
+          existing plan above). Weave in the user's habits and open tasks where sensible.
+        - A one-off with a time ("buy groceries at 5pm") → add_plan.
+        - A one-off without a time → add_task.
+        - A question or summary request → empty actions array, answer in "reply".
+        - Multiple requests in one message → multiple actions.
+        - "start" must be 24-hour "HH:MM". Keep names/titles short (2-5 words), not the
+          user's whole sentence.
     """.trimIndent()
 
     /** Parses the model's JSON reply; returns null if it isn't valid JSON. */
@@ -79,11 +97,39 @@ object AiProtocol {
     private val timeRegex = Regex("(?i)\\bat\\s+(\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?")
     private val prefixRegex = Regex("(?i)^(add|remind me to|create|schedule)\\s+")
 
+    private val habitRegex = Regex(
+        "(?i)\\bhabits?\\b|\\bevery ?day\\b|\\bdaily\\b|^\\s*(quit|stop)\\s+"
+    )
+
     /**
-     * Offline fallback that mirrors the prototype's behavior: "add buy groceries
-     * at 5pm" becomes a plan block; anything else becomes a Personal task.
+     * Offline fallback — simple rules, no AI model involved:
+     * habit-sounding requests become habits, "at 5pm" requests become plan
+     * blocks, day-planning needs a real key, anything else becomes a task.
      */
     fun simulate(input: String): AiResult {
+        // Habit intent
+        if (habitRegex.containsMatchIn(input)) {
+            val name = input
+                .replace(prefixRegex, "")
+                .replace(Regex("(?i)\\ba\\s+habit\\s+(to|of|for)\\s+"), "")
+                .replace(Regex("(?i)\\bas a habit\\b|\\bhabits?\\b|\\bevery ?day\\b|\\bdaily\\b"), "")
+                .trim().trim('.', ',', '!').trim()
+                .replaceFirstChar { it.uppercaseChar() }
+                .ifEmpty { "New habit" }
+            return AiResult(
+                reply = "Done — created the habit \"$name\". It's on your Today tab; tap it each day to build the streak.",
+                actions = listOf(AiAction.AddHabit(name, "Health", "Daily")),
+            )
+        }
+
+        // Day planning needs a real model
+        if (Regex("(?i)\\bplan\\s+(my|the|out)\\b").containsMatchIn(input)) {
+            return AiResult(
+                reply = "Planning a whole day needs the full assistant — add your Gemini or Claude API key in Settings and I'll lay out your day. Offline I can still do quick adds like \"gym at 6pm\".",
+                actions = emptyList(),
+            )
+        }
+
         val match = timeRegex.find(input)
         val cleanedTitle = input
             .replace(timeRegex, "")

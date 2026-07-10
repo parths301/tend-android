@@ -278,11 +278,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val key = apiKey.value
+                // With a key: use the real model, and surface failures instead of
+                // silently degrading to the offline rules (which can misfile things).
                 val result = if (key.isNotBlank()) {
-                    runRemote(provider.value, key) ?: run {
-                        delay(400)
-                        AiProtocol.simulate(input)
-                    }
+                    runRemote(provider.value, key) ?: return@launch
                 } else {
                     delay(550)
                     AiProtocol.simulate(input)
@@ -303,7 +302,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 AiProtocol.parse(raw) ?: com.tend.app.ai.AiResult(raw.take(500), emptyList())
             } catch (e: Exception) {
                 val label = SettingsRepository.providerLabel(aiProvider)
-                push(ChatMsg(true, "Couldn't reach $label (${e.message?.take(80) ?: "network error"}) — handling it locally instead."))
+                push(
+                    ChatMsg(
+                        true,
+                        "$label request failed: ${e.message?.take(120) ?: "network error"}. " +
+                            "Check your key and model in Settings, then try again."
+                    )
+                )
                 null
             }
         }

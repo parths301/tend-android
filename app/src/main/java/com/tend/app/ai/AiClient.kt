@@ -29,9 +29,16 @@ class AiClient {
         model: String,
         system: String,
         history: List<Pair<Boolean, String>>,
-    ): String = when (provider) {
-        SettingsRepository.PROVIDER_GEMINI -> geminiComplete(apiKey, model, system, history)
-        else -> claudeComplete(apiKey, model, system, history)
+    ): String {
+        // Both Gemini and Anthropic require the conversation to open with a user
+        // turn; the app's greeting bubble is assistant-authored, so drop leading
+        // assistant messages before sending.
+        val turns = history.dropWhile { it.first }
+        require(turns.isNotEmpty()) { "no user message to send" }
+        return when (provider) {
+            SettingsRepository.PROVIDER_GEMINI -> geminiComplete(apiKey, model, system, turns)
+            else -> claudeComplete(apiKey, model, system, turns)
+        }
     }
 
     /** Models the key can use, best default first. */
@@ -59,6 +66,9 @@ class AiClient {
         val body = JSONObject()
             .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
             .put("contents", contents)
+            // The app's protocol is JSON-only; force structured output so the
+            // model can't wrap it in prose or markdown fences.
+            .put("generationConfig", JSONObject().put("responseMimeType", "application/json"))
 
         val raw = http(
             "POST", "$GEMINI_BASE/models/$model:generateContent",
