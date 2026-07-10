@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+body{margin:0;background:#E9E4D7;font-family:system-ui,sans-serif}
+a{color:#24201A}a:hover{color:#D96F4E}
+::-webkit-scrollbar{display:none}
+@keyframes slideUp{from{transform:translateY(48px);opacity:0}to{transform:none;opacity:1}}
+@keyframes popIn{from{transform:scale(.8);opacity:0}to{transform:none;opacity:1}}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:36px;box-sizing:border-box">
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" hint-size="428,908">
+<div style="height:100%;display:flex;flex-direction:column;background:#F5F1E8;color:#24201A;font-family:system-ui,sans-serif;position:relative;overflow:hidden">
+
+  <div style="flex:1;min-height:0;overflow:auto;overscroll-behavior:contain" onTouchStart="{{ onTouchStart }}" onTouchEnd="{{ onTouchEnd }}">
+
+    <!-- ══════════ TODAY ══════════ -->
+    <sc-if value="{{ isToday }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Today" style="padding:16px 16px 12px;display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div style="font-size:10.5px;letter-spacing:1.6px;font-weight:700;color:#B4AC9C">THURSDAY · JUL 9</div>
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;letter-spacing:-0.5px;margin-top:1px">Today</div>
+            <div style="font-size:12.5px;color:#8A8072;margin-top:2px">{{ summary }}</div>
+          </div>
+          <div onClick="{{ goWidgets }}" style-hover="border-color:#B4AC9C" style="margin-top:6px;width:38px;height:38px;border-radius:12px;border:1px solid #DDD6C6;background:#FFFDF7;display:grid;grid-template-columns:8px 8px;grid-template-rows:8px 8px;gap:3px;align-content:center;justify-content:center;cursor:pointer">
+            <div style="background:#24201A;border-radius:2.5px"></div>
+            <div style="background:#D96F4E;border-radius:2.5px"></div>
+            <div style="background:#B4AC9C;border-radius:2.5px"></div>
+            <div style="background:#24201A;border-radius:2.5px"></div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between">
+          <sc-for list="{{ weekStrip }}" as="d" hint-placeholder-count="7">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:3px">
+              <span style="font-size:10px;font-weight:700;letter-spacing:0.6px;color:{{ d.lcol }}">{{ d.label }}</span>
+              <div style="position:relative;width:44px;height:44px">
+                <svg width="44" height="44" viewBox="0 0 44 44">
+                  <circle cx="22" cy="22" r="18" fill="none" stroke="#E6E0D1" strokeWidth="3.5"></circle>
+                  <circle cx="22" cy="22" r="18" fill="none" stroke="{{ d.ring }}" strokeWidth="3.5" strokeLinecap="round" strokeDasharray="{{ d.dash }}" transform="rotate(-90 22 22)"></circle>
+                </svg>
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk',sans-serif;font-size:10.5px;font-weight:700;color:{{ d.ccol }}">{{ d.count }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="flex:1;min-width:0;display:flex;gap:6px;overflow-x:auto">
+            <sc-for list="{{ chips }}" as="ch" hint-placeholder-count="5">
+              <div onClick="{{ ch.onPick }}" style="flex:none;padding:7px 13px;border-radius:99px;font-size:12px;font-weight:600;cursor:pointer;background:{{ ch.bg }};color:{{ ch.col }};border:{{ ch.bd }}">{{ ch.label }}</div>
+            </sc-for>
+          </div>
+          <div style="flex:none;display:flex;background:#EBE5D7;border-radius:10px;padding:3px">
+            <div onClick="{{ onViewGrid }}" style="padding:5px 10px;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer;background:{{ segGrid.bg }};color:{{ segGrid.col }};box-shadow:{{ segGrid.sh }}">Grid</div>
+            <div onClick="{{ onViewWeek }}" style="padding:5px 10px;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer;background:{{ segWeek.bg }};color:{{ segWeek.col }};box-shadow:{{ segWeek.sh }}">Week</div>
+          </div>
+        </div>
+
+        <sc-for list="{{ habitCards }}" as="h" hint-placeholder-count="4">
+          <div style="background:#FFFDF7;border:1px solid #E8E2D3;border-radius:20px;padding:14px 14px 15px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div onClick="{{ h.onOpen }}" style="width:42px;height:42px;border-radius:13px;background:{{ h.soft }};color:{{ h.color }};display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;letter-spacing:0.5px;cursor:pointer">{{ h.glyph }}</div>
+              <div onClick="{{ h.onOpen }}" style="flex:1;min-width:0;cursor:pointer">
+                <div style="font-size:15.5px;font-weight:600">{{ h.name }}</div>
+                <div style="font-size:12px;color:#8A8072;margin-top:2px"><span style="color:{{ h.color }};font-weight:700">{{ h.streakLabel }}</span> · {{ h.goal }}</div>
+              </div>
+              <div onClick="{{ h.onToggle }}" style-hover="transform:scale(1.05)" style="width:46px;height:46px;border-radius:15px;background:{{ h.btnBg }};color:{{ h.btnCol }};border:{{ h.btnBd }};display:flex;align-items:center;justify-content:center;font-size:{{ h.btnFs }};font-weight:700;cursor:pointer;transition:all .15s;box-sizing:border-box">{{ h.btnGlyph }}</div>
+            </div>
+            <sc-if value="{{ gridView }}" hint-placeholder-val="{{ true }}">
+              <div style="display:grid;grid-template-rows:repeat(7,13px);grid-auto-flow:column;grid-auto-columns:13px;gap:4px;overflow:hidden;justify-content:end">
+                <sc-for list="{{ h.cells }}" as="c" hint-placeholder-count="112">
+                  <div style="width:13px;height:13px;border-radius:4px;background:{{ c.bg }};box-shadow:{{ c.sh }}"></div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ weekView }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;gap:8px">
+                <sc-for list="{{ h.weekCells }}" as="w" hint-placeholder-count="7">
+                  <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px">
+                    <div style="font-size:10px;font-weight:700;color:#B4AC9C">{{ w.label }}</div>
+                    <div style="width:100%;height:38px;border-radius:11px;background:{{ w.bg }};color:{{ w.col }};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;box-shadow:{{ w.sh }}">{{ w.glyph }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- ══════════ PLAN ══════════ -->
+    <sc-if value="{{ isPlan }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Plan" style="padding:16px 16px 24px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:18px">
+          <div>
+            <div style="font-size:10.5px;letter-spacing:1.6px;font-weight:700;color:#B4AC9C">THURSDAY · JUL 9</div>
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;letter-spacing:-0.5px;margin-top:1px">Plan</div>
+          </div>
+          <div onClick="{{ openAi }}" style-hover="background:#3A342B" style="background:#24201A;color:#F5F1E8;font-size:12px;font-weight:700;padding:9px 14px;border-radius:99px;cursor:pointer">+ Add block</div>
+        </div>
+        <sc-for list="{{ planItems }}" as="p" hint-placeholder-count="9">
+          <sc-if value="{{ p.isGap }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:10px;padding:3px 0 3px 72px">
+              <div style="height:22px;border-left:2px dashed #D9D2C2"></div>
+              <span style="font-size:11px;color:#B4AC9C">{{ p.label }}</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ p.isItem }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;gap:12px;padding:5px 0">
+              <div style="width:44px;flex:none;text-align:right;font-size:11px;color:#B4AC9C;font-weight:700;padding-top:6px">{{ p.time }}</div>
+              <div style="width:32px;flex:none;display:flex;justify-content:center">
+                <div style="width:32px;min-height:44px;border-radius:16px;background:{{ p.soft }};display:flex;align-items:flex-start;justify-content:center;padding-top:11px;box-sizing:border-box">
+                  <div style="width:10px;height:10px;border-radius:50%;background:{{ p.color }}"></div>
+                </div>
+              </div>
+              <div style="flex:1;min-width:0;padding-top:2px">
+                <div style="font-size:11px;color:#B4AC9C">{{ p.range }}</div>
+                <div style="font-size:15px;font-weight:600;color:{{ p.tcol }};text-decoration:{{ p.deco }};margin-top:1px">{{ p.title }}</div>
+                <sc-if value="{{ p.tag }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:inline-block;margin-top:4px;font-size:9.5px;font-weight:700;letter-spacing:0.6px;color:{{ p.color }};background:{{ p.soft }};padding:3px 7px;border-radius:6px">{{ p.tag }}</div>
+                </sc-if>
+              </div>
+              <div onClick="{{ p.onToggle }}" style="align-self:center;flex:none;width:34px;height:34px;border-radius:50%;background:{{ p.cBg }};border:{{ p.cBd }};color:{{ p.cCol }};display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;font-weight:700;box-sizing:border-box">{{ p.cGlyph }}</div>
+            </div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- ══════════ TASKS ══════════ -->
+    <sc-if value="{{ isTasks }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Tasks" style="padding:16px 16px 24px">
+        <div style="margin-bottom:14px">
+          <div style="font-size:10.5px;letter-spacing:1.6px;font-weight:700;color:#B4AC9C">THURSDAY · JUL 9</div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;letter-spacing:-0.5px;margin-top:1px">Tasks</div>
+          <div style="font-size:12.5px;color:#8A8072;margin-top:2px">{{ taskSummary }}</div>
+        </div>
+        <sc-for list="{{ taskGroups }}" as="g" hint-placeholder-count="3">
+          <div style="margin-bottom:6px">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;padding:10px 2px 6px">
+              <span style="font-size:11px;font-weight:700;letter-spacing:1.2px;color:#B4AC9C">{{ g.name }}</span>
+              <span style="font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:700;color:#B4AC9C">{{ g.countLabel }}</span>
+            </div>
+            <div style="background:#FFFDF7;border:1px solid #E8E2D3;border-radius:18px;overflow:hidden">
+              <sc-for list="{{ g.items }}" as="t" hint-placeholder-count="2">
+                <div style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid #F0EBDE">
+                  <div onClick="{{ t.onToggle }}" style="flex:none;width:24px;height:24px;border-radius:50%;background:{{ t.cBg }};border:{{ t.cBd }};color:#FFFDF7;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;cursor:pointer;box-sizing:border-box;transition:all .15s">{{ t.cGlyph }}</div>
+                  <div style="flex:1;font-size:14.5px;font-weight:500;color:{{ t.tcol }};text-decoration:{{ t.deco }}">{{ t.title }}</div>
+                  <div style="color:#D9D2C2;font-size:16px">›</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+        <div onClick="{{ openAi }}" style-hover="border-color:#B4AC9C" style="margin-top:10px;display:flex;align-items:center;gap:10px;padding:13px 14px;border:1.5px dashed #D9D2C2;border-radius:16px;cursor:pointer;color:#8A8072;font-size:13.5px;font-weight:600">
+          <span style="font-size:17px;line-height:1">+</span> Add a task — or ask Tend
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ══════════ STATS ══════════ -->
+    <sc-if value="{{ isStats }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Analytics" style="padding:16px 16px 24px;display:flex;flex-direction:column;gap:14px">
+        <div>
+          <div style="font-size:10.5px;letter-spacing:1.6px;font-weight:700;color:#B4AC9C">LAST 30 DAYS</div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;letter-spacing:-0.5px;margin-top:1px">Analytics</div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <sc-for list="{{ statCards }}" as="s" hint-placeholder-count="3">
+            <div style="flex:1;background:#FFFDF7;border:1px solid #E8E2D3;border-radius:18px;padding:14px 12px;display:flex;flex-direction:column;gap:2px">
+              <div style="width:8px;height:8px;border-radius:3px;background:{{ s.color }};margin-bottom:6px"></div>
+              <div style="font-family:'Space Grotesk',sans-serif;font-size:24px;font-weight:700;letter-spacing:-0.5px">{{ s.big }}</div>
+              <div style="font-size:11px;font-weight:600;color:#8A8072">{{ s.label }}</div>
+              <div style="font-size:10.5px;color:#B4AC9C">{{ s.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="background:#24201A;color:#F5F1E8;border-radius:20px;padding:16px 16px 14px">
+          <div style="font-size:10.5px;letter-spacing:1.4px;font-weight:700;color:#8A8072;margin-bottom:12px">INSIGHTS</div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;gap:11px;align-items:flex-start">
+              <div style="flex:none;width:26px;height:26px;border-radius:9px;background:rgba(217,111,78,.22);display:flex;align-items:center;justify-content:center;color:#E8926F;font-weight:700;font-size:13px">▲</div>
+              <div><div style="font-size:13.5px;font-weight:600">Personal best on Read 20 pages</div><div style="font-size:12px;color:#A79E8D;margin-top:1px">34-day streak — your longest ever. Keep it alive tonight.</div></div>
+            </div>
+            <div style="display:flex;gap:11px;align-items:flex-start">
+              <div style="flex:none;width:26px;height:26px;border-radius:9px;background:rgba(125,116,201,.25);display:flex;align-items:center;justify-content:center;color:#A79FE0;font-weight:700;font-size:13px">◆</div>
+              <div><div style="font-size:13.5px;font-weight:600">Tuesdays are your focus day</div><div style="font-size:12px;color:#A79E8D;margin-top:1px">You log 38% more Deep Work hours on Tuesdays.</div></div>
+            </div>
+            <div style="display:flex;gap:11px;align-items:flex-start">
+              <div style="flex:none;width:26px;height:26px;border-radius:9px;background:rgba(47,156,130,.25);display:flex;align-items:center;justify-content:center;color:#5FBEA4;font-weight:700;font-size:13px">●</div>
+              <div><div style="font-size:13.5px;font-weight:600">81% week completion</div><div style="font-size:12px;color:#A79E8D;margin-top:1px">21 of 26 check-ins done. 3 more beats last week.</div></div>
+            </div>
+          </div>
+        </div>
+        <div style="background:#FFFDF7;border:1px solid #E8E2D3;border-radius:20px;padding:16px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
+            <div style="font-size:13px;font-weight:700">Focus hours</div>
+            <div style="font-size:11px;color:#B4AC9C;font-weight:600">last 30 days</div>
+          </div>
+          <div style="display:flex;align-items:flex-end;gap:3px;height:96px">
+            <sc-for list="{{ trendBars }}" as="b" hint-placeholder-count="30">
+              <div style="flex:1;border-radius:3px 3px 0 0;background:{{ b.bg }};height:{{ b.h }}"></div>
+            </sc-for>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:#B4AC9C"><span>Jun 10</span><span>Jun 24</span><span>Jul 9</span></div>
+        </div>
+        <div style="background:#FFFDF7;border:1px solid #E8E2D3;border-radius:20px;padding:16px;display:flex;flex-direction:column;gap:11px">
+          <div style="font-size:13px;font-weight:700">Completion by habit</div>
+          <sc-for list="{{ habitStats }}" as="hs" hint-placeholder-count="4">
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="font-weight:600">{{ hs.name }}</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;color:{{ hs.color }}">{{ hs.pct }}</span></div>
+              <div style="height:6px;border-radius:3px;background:#EFEAE0"><div style="height:6px;border-radius:3px;background:{{ hs.color }};width:{{ hs.w }}"></div></div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ══════════ WIDGETS ══════════ -->
+    <sc-if value="{{ isWidgets }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Widgets" style="min-height:100%;box-sizing:border-box;background:linear-gradient(165deg,#3A4A45 0%,#25332F 55%,#182220 100%);padding:16px 16px 28px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div onClick="{{ goToday }}" style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.1);color:#F5F1E8;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer">‹</div>
+          <div>
+            <div style="color:#F5F1E8;font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700">Home screen widgets</div>
+            <div style="color:rgba(245,241,232,.55);font-size:11.5px">Your habits, one glance away</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">
+          <div style="display:flex;gap:12px">
+            <div style="flex:1;background:rgba(18,24,22,.78);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:14px;backdrop-filter:blur(8px)">
+              <div style="font-size:10px;font-weight:700;letter-spacing:1.2px;color:rgba(245,241,232,.5)">READ 20 PAGES</div>
+              <div style="font-family:'Space Grotesk',sans-serif;font-size:34px;font-weight:700;color:#5FBEA4;margin-top:4px">{{ readStreak }}</div>
+              <div style="font-size:11px;color:rgba(245,241,232,.65);margin-bottom:10px">day streak</div>
+              <div style="display:flex;gap:4px">
+                <sc-for list="{{ readDots }}" as="rd" hint-placeholder-count="7">
+                  <div style="flex:1;height:6px;border-radius:3px;background:{{ rd.bg }}"></div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="flex:1;background:rgba(18,24,22,.78);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:14px;display:flex;flex-direction:column">
+              <div style="font-size:10px;font-weight:700;letter-spacing:1.2px;color:rgba(245,241,232,.5)">NO SUGAR</div>
+              <div style="font-size:11px;color:rgba(245,241,232,.65);margin-top:4px">{{ noSugarLabel }}</div>
+              <div onClick="{{ toggleNoSugar }}" style="margin-top:auto;align-self:flex-end;width:44px;height:44px;border-radius:15px;background:{{ nsBtn.bg }};color:{{ nsBtn.col }};border:{{ nsBtn.bd }};display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;cursor:pointer;box-sizing:border-box">✓</div>
+            </div>
+          </div>
+          <div style="background:rgba(18,24,22,.78);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div>
+                <div style="font-size:13px;font-weight:700;color:#F5F1E8">Morning Stretch</div>
+                <div style="font-size:11px;color:rgba(245,241,232,.55)">{{ stretchMeta }}</div>
+              </div>
+              <div onClick="{{ toggleStretch }}" style="width:40px;height:40px;border-radius:13px;background:{{ msBtn.bg }};color:{{ msBtn.col }};border:{{ msBtn.bd }};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;cursor:pointer;box-sizing:border-box">✓</div>
+            </div>
+            <div style="display:grid;grid-template-rows:repeat(7,11px);grid-auto-flow:column;grid-auto-columns:11px;gap:3.5px;justify-content:center">
+              <sc-for list="{{ widgetCells }}" as="wc" hint-placeholder-count="112">
+                <div style="width:11px;height:11px;border-radius:3.5px;background:{{ wc.bg }};box-shadow:{{ wc.sh }}"></div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="background:rgba(18,24,22,.78);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:14px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
+              <div style="font-size:13px;font-weight:700;color:#F5F1E8">Deep Work</div>
+              <div style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;color:#A79FE0">{{ deepTotal }} this week</div>
+            </div>
+            <div style="display:flex;gap:7px;align-items:flex-end;height:64px">
+              <sc-for list="{{ deepBars }}" as="db" hint-placeholder-count="7">
+                <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%">
+                  <div style="width:100%;border-radius:6px;background:{{ db.bg }};height:{{ db.h }}"></div>
+                  <div style="font-size:9px;font-weight:700;color:rgba(245,241,232,.45)">{{ db.label }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ══════════ HABIT DETAIL ══════════ -->
+    <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Habit detail" style="padding:16px 16px 24px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:center;gap:11px">
+          <div onClick="{{ goToday }}" style-hover="background:#EBE5D7" style="flex:none;width:34px;height:34px;border-radius:50%;border:1px solid #DDD6C6;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer">‹</div>
+          <div style="flex:none;width:42px;height:42px;border-radius:13px;background:{{ detail.soft }};color:{{ detail.color }};display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px">{{ detail.glyph }}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:19px;font-weight:700;letter-spacing:-0.3px">{{ detail.name }}</div>
+            <div style="font-size:12px;color:#8A8072"><span style="color:{{ detail.color }};font-weight:700">{{ detail.streakLabel }}</span> · {{ detail.goal }}</div>
+          </div>
+          <div onClick="{{ detail.onToggle }}" style="flex:none;width:44px;height:44px;border-radius:14px;background:{{ detail.btnBg }};color:{{ detail.btnCol }};border:{{ detail.btnBd }};display:flex;align-items:center;justify-content:center;font-size:{{ detail.btnFs }};font-weight:700;cursor:pointer;box-sizing:border-box">{{ detail.btnGlyph }}</div>
+        </div>
+
+        <div style="background:#FFFDF7;border:1px solid #E8E2D3;border-radius:20px;padding:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <span style="color:#D9D2C2;font-size:16px;padding:0 6px">‹</span>
+            <span style="font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:700">July 2026</span>
+            <span style="color:#D9D2C2;font-size:16px;padding:0 6px">›</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:6px">
+            <div style="text-align:center;font-size:9.5px;font-weight:700;color:#B4AC9C">MO</div>
+            <div style="text-align:center;font-size:9.5px;font-weight:700;color:#B4AC9C">TU</div>
+            <div style="text-align:center;font-size:9.5px;font-weight:700;color:#B4AC9C">WE</div>
+            <div style="text-align:center;font-size:9.5px;font-weight:700;color:#B4AC9C">TH</div>
+            <div style="text-align:center;font-size:9.5px;font-weight:700;color:#B4AC9C">FR</div>
+            <div style="text-align:center;font-size:9.5px;font-weight:700;color:#B4AC9C">SA</div>
+            <div style="text-align:center;font-size:9.5px;font-weight:700;color:#B4AC9C">SU</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">
+            <sc-for list="{{ detailCells }}" as="c" hint-placeholder-count="33">
+              <div style="aspect-ratio:1;border-radius:10px;background:{{ c.bg }};border:{{ c.bd }};color:{{ c.col }};display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:600;box-shadow:{{ c.sh }};box-sizing:border-box">{{ c.d }}</div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px">
+          <div style="flex:1;background:#FFFDF7;border:1px solid #E8E2D3;border-radius:16px;padding:12px;text-align:center">
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700">{{ detail.streak }}</div><div style="font-size:10.5px;color:#8A8072;font-weight:600">current streak</div>
+          </div>
+          <div style="flex:1;background:#FFFDF7;border:1px solid #E8E2D3;border-radius:16px;padding:12px;text-align:center">
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700">{{ detail.best }}</div><div style="font-size:10.5px;color:#8A8072;font-weight:600">best streak</div>
+          </div>
+          <div style="flex:1;background:#FFFDF7;border:1px solid #E8E2D3;border-radius:16px;padding:12px;text-align:center">
+            <div style="font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700">{{ detail.rate }}</div><div style="font-size:10.5px;color:#8A8072;font-weight:600">30-day rate</div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;color:#B4AC9C;padding:4px 2px 8px">NOTES</div>
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <input value="{{ noteInput }}" onChange="{{ onNoteInput }}" onKeyDown="{{ onNoteKey }}" placeholder="Add a note for today…" style="flex:1;border:1px solid #DDD6C6;background:#FFFDF7;border-radius:13px;padding:11px 13px;font-size:13px;font-family:system-ui,sans-serif;color:#24201A;outline:none"></input>
+            <div onClick="{{ addNote }}" style="flex:none;width:42px;height:42px;border-radius:13px;background:#24201A;color:#F5F1E8;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer">↑</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ detailNotes }}" as="n" hint-placeholder-count="2">
+              <div style="background:#FFFDF7;border:1px solid #E8E2D3;border-radius:14px;padding:11px 13px">
+                <div style="font-size:10.5px;color:#B4AC9C;font-weight:700;margin-bottom:3px">{{ n.d }} · {{ n.t }}</div>
+                <div style="font-size:13.5px;line-height:1.45">{{ n.x }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- ══════════ AI BAR ══════════ -->
+  <sc-if value="{{ aiBarOn }}" hint-placeholder-val="{{ true }}">
+    <div style="padding:8px 14px 6px;background:#F5F1E8">
+      <div onClick="{{ openAi }}" style-hover="background:#3A342B" style="display:flex;align-items:center;gap:10px;background:#24201A;border-radius:99px;padding:12px 16px;cursor:pointer;box-shadow:0 6px 18px rgba(36,32,26,.18)">
+        <span style="color:#E8926F;font-size:15px">✦</span>
+        <span style="color:rgba(245,241,232,.75);font-size:13.5px;flex:1">Ask Tend — add habits, tasks, plans…</span>
+        <span style="color:rgba(245,241,232,.4);font-size:12px">swipe ⇄ tabs</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ NAV ══════════ -->
+  <div style="display:flex;background:#F5F1E8;border-top:1px solid #E8E2D3;padding:6px 8px 4px">
+    <div onClick="{{ goToday }}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;cursor:pointer;color:{{ navToday.col }}">
+      <div style="width:13px;height:13px;border-radius:50%;border:2.5px solid currentColor;background:{{ navToday.fill }};box-sizing:border-box"></div>
+      <span style="font-size:10px;font-weight:{{ navToday.w }}">Today</span>
+    </div>
+    <div onClick="{{ goPlan }}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;cursor:pointer;color:{{ navPlan.col }}">
+      <div style="width:13px;height:13px;border-radius:4px;border:2.5px solid currentColor;background:{{ navPlan.fill }};box-sizing:border-box"></div>
+      <span style="font-size:10px;font-weight:{{ navPlan.w }}">Plan</span>
+    </div>
+    <div onClick="{{ goTasks }}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;cursor:pointer;color:{{ navTasks.col }}">
+      <div style="width:13px;height:13px;border-radius:50%;border:2.5px solid currentColor;background:{{ navTasks.fill }};display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:900;box-sizing:border-box">✓</div>
+      <span style="font-size:10px;font-weight:{{ navTasks.w }}">Tasks</span>
+    </div>
+    <div onClick="{{ goStats }}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;cursor:pointer;color:{{ navStats.col }}">
+      <div style="display:flex;align-items:flex-end;gap:2px;height:13px">
+        <div style="width:3px;height:7px;border-radius:1.5px;background:currentColor"></div>
+        <div style="width:3px;height:13px;border-radius:1.5px;background:currentColor"></div>
+        <div style="width:3px;height:10px;border-radius:1.5px;background:currentColor"></div>
+      </div>
+      <span style="font-size:10px;font-weight:{{ navStats.w }}">Stats</span>
+    </div>
+  </div>
+
+  <!-- ══════════ AI SHEET ══════════ -->
+  <sc-if value="{{ aiOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeAi }}" style="position:absolute;inset:0;background:rgba(24,20,14,.45);display:flex;flex-direction:column;justify-content:flex-end;z-index:40">
+      <div onClick="{{ eatClick }}" style="background:#F8F5EE;border-radius:26px 26px 0 0;max-height:80%;display:flex;flex-direction:column;animation:slideUp .28s ease;box-shadow:0 -12px 40px rgba(24,20,14,.25)">
+        <div style="display:flex;justify-content:center;padding:10px 0 2px"><div style="width:36px;height:4px;border-radius:2px;background:#D9D2C2"></div></div>
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 18px 10px;border-bottom:1px solid #EBE5D7">
+          <span style="color:#D96F4E;font-size:16px">✦</span>
+          <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;flex:1">Tend</span>
+          <div onClick="{{ closeAi }}" style="width:28px;height:28px;border-radius:50%;background:#EBE5D7;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;color:#8A8072">✕</div>
+        </div>
+        <div style="flex:1;min-height:120px;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <sc-for list="{{ aiMessages }}" as="m" hint-placeholder-count="1">
+            <div style="align-self:{{ m.align }};max-width:82%;background:{{ m.bg }};color:{{ m.col }};border:{{ m.bd }};border-radius:{{ m.radius }};padding:10px 13px;font-size:13.5px;line-height:1.45;animation:popIn .18s ease">{{ m.text }}</div>
+          </sc-for>
+        </div>
+        <div style="display:flex;gap:7px;padding:4px 16px 10px;overflow-x:auto">
+          <div onClick="{{ chip1 }}" style-hover="background:#EBE5D7" style="flex:none;font-size:12px;font-weight:600;padding:8px 13px;border-radius:99px;border:1px solid #DDD6C6;cursor:pointer;color:#5A5344">Plan my morning</div>
+          <div onClick="{{ chip2 }}" style-hover="background:#EBE5D7" style="flex:none;font-size:12px;font-weight:600;padding:8px 13px;border-radius:99px;border:1px solid #DDD6C6;cursor:pointer;color:#5A5344">Add a task</div>
+          <div onClick="{{ chip3 }}" style-hover="background:#EBE5D7" style="flex:none;font-size:12px;font-weight:600;padding:8px 13px;border-radius:99px;border:1px solid #DDD6C6;cursor:pointer;color:#5A5344">How's my week?</div>
+        </div>
+        <div style="display:flex;gap:8px;padding:0 16px 16px">
+          <input value="{{ aiInput }}" onChange="{{ onAiInput }}" onKeyDown="{{ onAiKey }}" placeholder="Add buy groceries at 5pm…" style="flex:1;border:1px solid #DDD6C6;background:#FFFDF7;border-radius:99px;padding:12px 16px;font-size:13.5px;font-family:system-ui,sans-serif;color:#24201A;outline:none"></input>
+          <div onClick="{{ sendAi }}" style="flex:none;width:44px;height:44px;border-radius:50%;background:#24201A;color:#F5F1E8;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer">↑</div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;heatmapWeeks&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:17,&quot;min&quot;:8,&quot;max&quot;:17,&quot;step&quot;:1,&quot;unit&quot;:&quot;wk&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;showAiBar&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Features&quot;}}">
+class Component extends DCLogic {
+  rng(n) { return () => { n = (n * 1664525 + 1013904223) % 4294967296; return n / 4294967296; }; }
+  makeBase(seed, density) {
+    const r = this.rng(seed); const arr = [];
+    for (let i = 0; i < 140; i++) arr.push(r() < density);
+    return arr;
+  }
+
+  state = {
+    tab: 'today', view: 'grid', filter: 'All',
+    aiOpen: false, aiInput: '', noteInput: '', detailId: 1,
+    habits: [
+      { id: 1, name: 'Morning Stretch', cat: 'Fitness', color: '#D96F4E', soft: 'rgba(217,111,78,.14)', glyph: 'MS', streak: 12, best: 21, done: false, type: 'check', base: this.makeBase(7, 0.74), goal: 'Daily · 8:00 AM' },
+      { id: 2, name: 'Deep Work', cat: 'Work', color: '#7D74C9', soft: 'rgba(125,116,201,.15)', glyph: 'DW', streak: 5, best: 11, done: false, type: 'time', goal: '2h · weekdays' },
+      { id: 3, name: 'Read 20 pages', cat: 'Mind', color: '#2F9C82', soft: 'rgba(47,156,130,.14)', glyph: 'RE', streak: 34, best: 34, done: true, type: 'check', goal: 'Daily · evening' },
+      { id: 4, name: 'No sugar', cat: 'Health', color: '#C9931F', soft: 'rgba(201,147,31,.15)', glyph: 'NS', streak: 4, best: 16, done: false, type: 'avoid', goal: 'Resist · daily' },
+    ],
+    taskGroups: [
+      { name: 'PERSONAL', items: [{ id: 1, title: 'Call mom', done: false }, { id: 2, title: 'Water the plants', done: false }] },
+      { name: 'WORK', items: [{ id: 3, title: 'Prepare client presentation', done: false }, { id: 4, title: 'Review PR feedback', done: true }] },
+      { name: 'HEALTH', items: [{ id: 5, title: 'Book dentist appointment', done: false }] },
+    ],
+    plan: [
+      { id: 1, time: '7:30', range: '7:30 – 7:45 AM · 15 min', title: 'Wake up + water', kind: 'habit', done: true },
+      { id: 2, time: '8:00', range: '8:00 – 8:20 AM · 20 min', title: 'Morning Stretch', kind: 'habit', done: true },
+      { id: 3, kind: 'gap', label: '10 min gap' },
+      { id: 4, time: '8:30', range: '8:30 – 10:00 AM · 1h 30m', title: 'Deep Work — thesis draft', kind: 'focus', done: false },
+      { id: 5, kind: 'gap', label: '15 min gap' },
+      { id: 6, time: '10:15', range: '10:15 – 10:40 AM · 25 min', title: 'Team standup', kind: 'event', done: false },
+      { id: 7, time: '12:30', range: '12:30 – 1:15 PM · 45 min', title: 'Lunch + walk', kind: 'habit', done: false },
+      { id: 8, time: '6:00', range: '6:00 – 7:00 PM · 1h', title: 'Gym session', kind: 'habit', done: false },
+      { id: 9, time: '9:30', range: '9:30 – 10:00 PM · 30 min', title: 'Read 20 pages', kind: 'habit', done: false },
+    ],
+    notes: {
+      1: [{ d: 'Jul 8', t: '8:24 AM', x: 'Hips feel way looser this week. Adding 2 min of ankle work.' }, { d: 'Jul 5', t: '8:31 AM', x: 'Skipped the neck rolls — slept badly, neck sore.' }],
+      2: [{ d: 'Jul 8', t: '10:02 AM', x: 'Finished the results section draft.' }, { d: 'Jul 7', t: '9:58 AM', x: '90 minutes, zero distractions. New record.' }],
+      3: [{ d: 'Jul 9', t: '7:40 AM', x: 'Started "The Overstory" — chapter 3 tonight.' }],
+      4: [{ d: 'Jul 6', t: '3:40 PM', x: 'Craving hit after lunch. Tea helped.' }],
+    },
+    messages: [
+      { role: 'ai', text: 'Good morning. 4 habits and 4 open tasks today — Read 20 pages is at a 34-day streak. What should I set up?' },
+    ],
+  };
+
+  // ── actions ──────────────────────────────
+  go(tab) { this.setState({ tab }); }
+  toggleHabit(id) {
+    this.setState(s => ({
+      habits: s.habits.map(h => h.id === id
+        ? { ...h, done: !h.done, streak: h.streak + (h.done ? -1 : 1), best: Math.max(h.best, h.streak + (h.done ? -1 : 1)) }
+        : h),
+    }));
+  }
+  toggleTask(gi, id) {
+    this.setState(s => {
+      const taskGroups = s.taskGroups.map((g, i) => i !== gi ? g : { ...g, items: g.items.map(t => t.id === id ? { ...t, done: !t.done } : t) });
+      return { taskGroups };
+    });
+  }
+  togglePlan(id) {
+    this.setState(s => ({ plan: s.plan.map(p => p.id === id ? { ...p, done: !p.done } : p) }));
+  }
+  pushMsg(role, text) { this.setState(s => ({ messages: [...s.messages, { role, text }] })); }
+  sendAi() {
+    const t = this.state.aiInput.trim(); if (!t) return;
+    this.pushMsg('user', t);
+    this.setState({ aiInput: '' });
+    setTimeout(() => {
+      const clean = t.replace(/^(add|remind me to|create)\s+/i, '');
+      const title = clean.charAt(0).toUpperCase() + clean.slice(1);
+      this.setState(s => {
+        const taskGroups = s.taskGroups.map((g, i) => i === 0 ? { ...g, items: [...g.items, { id: Date.now(), title, done: false }] } : g);
+        return { taskGroups };
+      });
+      this.pushMsg('ai', 'Done — added "' + title + '" to your tasks for today. It\'s in the Personal group; swipe to the Tasks tab to see it.');
+    }, 550);
+  }
+  chip1() {
+    this.pushMsg('user', 'Plan my morning');
+    setTimeout(() => {
+      this.setState(s => {
+        if (s.plan.some(p => p.id === 99)) return {};
+        const plan = [...s.plan];
+        plan.splice(6, 0, { id: 99, time: '11:00', range: '11:00 – 11:45 AM · 45 min', title: 'Inbox zero + admin', kind: 'focus', done: false });
+        return { plan };
+      });
+      this.pushMsg('ai', 'Your morning is blocked: Stretch 8:00, Deep Work 8:30–10:00, standup 10:15. I slotted "Inbox zero + admin" at 11:00 — check the Plan tab.');
+    }, 550);
+  }
+  chip2() {
+    this.pushMsg('user', 'Add a task');
+    setTimeout(() => this.pushMsg('ai', 'Sure — type it below. Try "Add buy groceries at 5pm" and I\'ll file it under the right group.'), 450);
+  }
+  chip3() {
+    this.pushMsg('user', "How's my week?");
+    setTimeout(() => {
+      const done = this.state.habits.filter(h => h.done).length;
+      this.pushMsg('ai', 'Solid week: 21 of 26 check-ins (81%). Read 20 pages is 7/7 — personal best. Today you\'re at ' + done + ' of 4 habits with 3 tasks left. Weakest spot: No sugar on weekends.');
+    }, 550);
+  }
+  addNote() {
+    const x = this.state.noteInput.trim(); if (!x) return;
+    this.setState(s => ({
+      noteInput: '',
+      notes: { ...s.notes, [s.detailId]: [{ d: 'Jul 9', t: 'Just now', x }, ...(s.notes[s.detailId] || [])] },
+    }));
+  }
+
+  // ── swipe ──────────────────────────────
+  _tx = 0; _ty = 0;
+  onTouchStart(e) { this._tx = e.touches[0].clientX; this._ty = e.touches[0].clientY; }
+  onTouchEnd(e) {
+    const dx = e.changedTouches[0].clientX - this._tx;
+    const dy = e.changedTouches[0].clientY - this._ty;
+    if (Math.abs(dx) > 70 && Math.abs(dy) < 60) {
+      const tabs = ['today', 'plan', 'tasks', 'stats'];
+      let i = tabs.indexOf(this.state.tab);
+      if (i < 0) return;
+      i = dx < 0 ? Math.min(i + 1, 3) : Math.max(i - 1, 0);
+      this.setState({ tab: tabs[i] });
+    }
+  }
+
+  // ── derived ──────────────────────────────
+  cellsFor(h, weeks) {
+    const n = weeks * 7; const cells = [];
+    const base = h.base || this.state.habits[0].base;
+    for (let i = 0; i < n; i++) {
+      const last = i === n - 1;
+      const on = last ? h.done : base[(i + 140 - n) % 140];
+      cells.push({
+        bg: on ? h.color : '#EFEAE0',
+        sh: last ? 'inset 0 0 0 1.5px #24201A' : 'none',
+      });
+    }
+    return cells;
+  }
+  weekCellsFor(h) {
+    const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    const base = h.base || this.state.habits[0].base;
+    return labels.map((label, i) => {
+      if (i < 3) {
+        const on = base[100 + i * 3];
+        return { label, bg: on ? h.color : '#EFEAE0', col: on ? '#FFFDF7' : '#C9C2B2', glyph: on ? '✓' : '·', sh: 'none' };
+      }
+      if (i === 3) return { label, bg: h.done ? h.color : '#EFEAE0', col: h.done ? '#FFFDF7' : '#C9C2B2', glyph: h.done ? '✓' : '·', sh: 'inset 0 0 0 1.5px #24201A' };
+      return { label, bg: '#F7F3EA', col: '#DDD6C6', glyph: '', sh: 'inset 0 0 0 1px #EBE5D7' };
+    });
+  }
+  btnFor(h) {
+    if (h.done) return { btnBg: h.color, btnCol: '#FFFDF7', btnBd: 'none', btnGlyph: '✓', btnFs: '19px' };
+    if (h.type === 'time') return { btnBg: 'transparent', btnCol: h.color, btnBd: '1.5px solid #DDD6C6', btnGlyph: '+30m', btnFs: '11.5px' };
+    return { btnBg: 'transparent', btnCol: '#B4AC9C', btnBd: '1.5px solid #DDD6C6', btnGlyph: '✓', btnFs: '17px' };
+  }
+
+  renderVals() {
+    const s = this.state;
+    const weeks = Math.max(8, Math.min(17, this.props.heatmapWeeks ?? 17));
+    const ink = '#24201A', muted = '#8A8072', faint = '#B4AC9C';
+    const doneCount = s.habits.filter(h => h.done).length;
+    const tasksLeft = s.taskGroups.reduce((a, g) => a + g.items.filter(t => !t.done).length, 0);
+    const tasksDone = s.taskGroups.reduce((a, g) => a + g.items.filter(t => t.done).length, 0);
+
+    // week strip
+    const C = 113.1;
+    const past = [{ label: 'MON', p: 1, count: '4/4' }, { label: 'TUE', p: 0.75, count: '3/4' }, { label: 'WED', p: 1, count: '4/4' }];
+    const weekStrip = [
+      ...past.map(d => ({ label: d.label, count: d.count, dash: (d.p * C).toFixed(0) + ' ' + C, ring: '#9A937F', lcol: faint, ccol: ink })),
+      { label: 'THU', count: doneCount + '/4', dash: ((doneCount / 4) * C).toFixed(0) + ' ' + C, ring: '#D96F4E', lcol: ink, ccol: ink },
+      { label: 'FRI', count: '·', dash: '0 ' + C, ring: 'transparent', lcol: faint, ccol: '#C9C2B2' },
+      { label: 'SAT', count: '·', dash: '0 ' + C, ring: 'transparent', lcol: faint, ccol: '#C9C2B2' },
+      { label: 'SUN', count: '·', dash: '0 ' + C, ring: 'transparent', lcol: faint, ccol: '#C9C2B2' },
+    ];
+
+    const cats = ['All', 'Fitness', 'Mind', 'Work', 'Health'];
+    const chips = cats.map(label => {
+      const on = s.filter === label;
+      return { label, bg: on ? ink : 'transparent', col: on ? '#F5F1E8' : muted, bd: on ? '1px solid ' + ink : '1px solid #DDD6C6', onPick: () => this.setState({ filter: label }) };
+    });
+
+    const habitsShown = s.habits.filter(h => s.filter === 'All' || h.cat === s.filter);
+    const habitCards = habitsShown.map(h => ({
+      ...h, ...this.btnFor(h),
+      streakLabel: '◆ ' + h.streak + (h.type === 'time' ? ' day' : '-day') + ' streak',
+      cells: this.cellsFor(h, weeks),
+      weekCells: this.weekCellsFor(h),
+      onToggle: () => this.toggleHabit(h.id),
+      onOpen: () => this.setState({ tab: 'detail', detailId: h.id }),
+    }));
+
+    // plan
+    const kindCol = { habit: '#D96F4E', focus: '#7D74C9', event: '#2F9C82' };
+    const kindSoft = { habit: 'rgba(217,111,78,.13)', focus: 'rgba(125,116,201,.14)', event: 'rgba(47,156,130,.13)' };
+    const planItems = s.plan.map(p => {
+      if (p.kind === 'gap') return { id: p.id, isGap: true, isItem: false, label: p.label };
+      return {
+        id: p.id, isGap: false, isItem: true, time: p.time, range: p.range, title: p.title,
+        color: kindCol[p.kind], soft: kindSoft[p.kind],
+        tag: p.kind === 'event' ? 'CALENDAR' : (p.kind === 'focus' ? 'FOCUS BLOCK' : ''),
+        tcol: p.done ? faint : ink, deco: p.done ? 'line-through' : 'none',
+        cBg: p.done ? kindCol[p.kind] : 'transparent',
+        cBd: p.done ? 'none' : '1.5px solid #DDD6C6',
+        cCol: p.done ? '#FFFDF7' : '#C9C2B2',
+        cGlyph: '✓',
+        onToggle: () => this.togglePlan(p.id),
+      };
+    });
+
+    const taskGroups = s.taskGroups.map((g, gi) => ({
+      name: g.name,
+      countLabel: g.items.filter(t => t.done).length + '/' + g.items.length,
+      items: g.items.map(t => ({
+        ...t,
+        tcol: t.done ? faint : ink, deco: t.done ? 'line-through' : 'none',
+        cBg: t.done ? '#2F9C82' : 'transparent',
+        cBd: t.done ? 'none' : '1.5px solid #D9D2C2',
+        cGlyph: t.done ? '✓' : '',
+        onToggle: () => this.toggleTask(gi, t.id),
+      })),
+    }));
+
+    // stats
+    const statCards = [
+      { big: '34', label: 'best streak', sub: 'Read 20 pages', color: '#2F9C82' },
+      { big: '81%', label: 'week completion', sub: '21 of 26 check-ins', color: '#D96F4E' },
+      { big: '9.6h', label: 'focus logged', sub: 'Deep Work · 7 days', color: '#7D74C9' },
+    ];
+    const r30 = this.rng(99);
+    const trendBars = Array.from({ length: 30 }, (_, i) => {
+      const v = 10 + r30() * 55 + i * 1.1;
+      return { h: Math.round(v) + 'px', bg: i === 29 ? '#7D74C9' : 'rgba(125,116,201,.4)' };
+    });
+    const habitStats = s.habits.map(h => {
+      const pct = { 1: 86, 2: 63, 3: 97, 4: 71 }[h.id];
+      return { name: h.name, color: h.color, pct: pct + '%', w: pct + '%' };
+    });
+
+    // widgets
+    const read = s.habits[2], stretch = s.habits[0], deep = s.habits[1], ns = s.habits[3];
+    const readDots = this.weekCellsFor(read).map(w => ({ bg: w.glyph === '✓' ? '#2F9C82' : 'rgba(255,255,255,.12)' }));
+    const widgetCells = this.cellsFor(stretch, 16).map(c => ({ bg: c.bg === '#EFEAE0' ? 'rgba(255,255,255,.09)' : c.bg, sh: c.sh === 'none' ? 'none' : 'inset 0 0 0 1.5px #F5F1E8' }));
+    const dh = [2.5, 0, 1.5, 2.0, 1.6, 0, 2.0];
+    const deepBars = ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((label, i) => ({
+      label, h: Math.max(4, dh[i] * 18) + 'px', bg: i === 3 ? '#A79FE0' : 'rgba(167,159,224,.35)',
+    }));
+
+    // detail
+    const dh2 = s.habits.find(h => h.id === s.detailId) || s.habits[0];
+    const base = dh2.base || s.habits[0].base;
+    const detailCells = [
+      ...[0, 1].map(() => ({ d: '', bg: 'transparent', bd: 'none', col: 'transparent', sh: 'none' })),
+      ...Array.from({ length: 31 }, (_, i) => {
+        const day = i + 1;
+        if (day > 9) return { d: day, bg: 'transparent', bd: '1px solid #EBE5D7', col: '#C9C2B2', sh: 'none' };
+        const on = day === 9 ? dh2.done : base[(day * 4 + 13) % 140];
+        return {
+          d: day, bg: on ? dh2.color : '#EFEAE0', bd: 'none',
+          col: on ? '#FFFDF7' : muted,
+          sh: day === 9 ? '0 0 0 2px #F5F1E8, 0 0 0 3.5px ' + ink : 'none',
+        };
+      }),
+    ];
+    const detail = {
+      ...dh2, ...this.btnFor(dh2),
+      streakLabel: '◆ ' + dh2.streak + '-day streak',
+      best: dh2.best,
+      rate: { 1: '86%', 2: '63%', 3: '97%', 4: '71%' }[dh2.id],
+      onToggle: () => this.toggleHabit(dh2.id),
+    };
+
+    const aiMessages = s.messages.map(m => m.role === 'ai'
+      ? { text: m.text, align: 'flex-start', bg: '#FFFDF7', col: ink, bd: '1px solid #E8E2D3', radius: '4px 16px 16px 16px' }
+      : { text: m.text, align: 'flex-end', bg: ink, col: '#F5F1E8', bd: 'none', radius: '16px 4px 16px 16px' });
+
+    const nav = t => s.tab === t
+      ? { col: ink, w: 700, fill: t === 'today' ? ink : 'transparent' }
+      : { col: '#B4AC9C', w: 600, fill: 'transparent' };
+
+    return {
+      isToday: s.tab === 'today', isPlan: s.tab === 'plan', isTasks: s.tab === 'tasks',
+      isStats: s.tab === 'stats', isWidgets: s.tab === 'widgets', isDetail: s.tab === 'detail',
+      gridView: s.view === 'grid', weekView: s.view === 'week',
+      summary: doneCount + ' of 4 habits done · ' + tasksLeft + ' tasks left',
+      taskSummary: tasksDone + ' done · ' + tasksLeft + ' remaining',
+      weekStrip, chips, habitCards, planItems, taskGroups, statCards, trendBars, habitStats,
+      readStreak: read.streak, readDots, widgetCells,
+      noSugarLabel: ns.streak + ' days clean', stretchMeta: '◆ ' + stretch.streak + '-day streak',
+      nsBtn: ns.done ? { bg: '#C9931F', col: '#181818', bd: 'none' } : { bg: 'transparent', col: 'rgba(255,255,255,.5)', bd: '1.5px solid rgba(255,255,255,.25)' },
+      msBtn: stretch.done ? { bg: '#D96F4E', col: '#FFFDF7', bd: 'none' } : { bg: 'transparent', col: 'rgba(255,255,255,.5)', bd: '1.5px solid rgba(255,255,255,.25)' },
+      deepTotal: '9.6h', deepBars,
+      detail, detailCells, detailNotes: s.notes[s.detailId] || [],
+      aiMessages, aiInput: s.aiInput, aiOpen: s.aiOpen, noteInput: s.noteInput,
+      aiBarOn: (this.props.showAiBar ?? true) && s.tab !== 'widgets' && s.tab !== 'detail',
+      segGrid: s.view === 'grid' ? { bg: '#FFFDF7', col: ink, sh: '0 1px 3px rgba(36,32,26,.12)' } : { bg: 'transparent', col: faint, sh: 'none' },
+      segWeek: s.view === 'week' ? { bg: '#FFFDF7', col: ink, sh: '0 1px 3px rgba(36,32,26,.12)' } : { bg: 'transparent', col: faint, sh: 'none' },
+      navToday: nav('today'), navPlan: nav('plan'), navTasks: nav('tasks'), navStats: nav('stats'),
+      goToday: () => this.go('today'), goPlan: () => this.go('plan'),
+      goTasks: () => this.go('tasks'), goStats: () => this.go('stats'), goWidgets: () => this.go('widgets'),
+      openAi: () => this.setState({ aiOpen: true }),
+      closeAi: () => this.setState({ aiOpen: false }),
+      eatClick: e => e.stopPropagation(),
+      onAiInput: e => this.setState({ aiInput: e.target.value }),
+      onAiKey: e => { if (e.key === 'Enter') this.sendAi(); },
+      sendAi: () => this.sendAi(),
+      chip1: () => this.chip1(), chip2: () => this.chip2(), chip3: () => this.chip3(),
+      onNoteInput: e => this.setState({ noteInput: e.target.value }),
+      onNoteKey: e => { if (e.key === 'Enter') this.addNote(); },
+      addNote: () => this.addNote(),
+      onViewGrid: () => this.setState({ view: 'grid' }),
+      onViewWeek: () => this.setState({ view: 'week' }),
+      onTouchStart: e => this.onTouchStart(e),
+      onTouchEnd: e => this.onTouchEnd(e),
+      toggleNoSugar: () => this.toggleHabit(4),
+      toggleStretch: () => this.toggleHabit(1),
+    };
+  }
+}
+</script>
+</body>
+</html>
