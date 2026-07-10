@@ -1,6 +1,7 @@
 package com.tend.app.data.db
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -37,8 +38,20 @@ interface HabitDao {
     @Insert
     suspend fun insertHabit(habit: Habit): Long
 
-    @Query("SELECT COUNT(*) FROM habits")
-    suspend fun count(): Int
+    @Query("SELECT * FROM habits WHERE id = :id LIMIT 1")
+    suspend fun habitById(id: Long): Habit?
+
+    @Query("DELETE FROM habits WHERE id = :habitId")
+    suspend fun deleteHabit(habitId: Long)
+
+    @Query("DELETE FROM habit_logs WHERE habitId = :habitId")
+    suspend fun deleteLogsFor(habitId: Long)
+
+    @Query("DELETE FROM habits")
+    suspend fun clearHabits()
+
+    @Query("DELETE FROM habit_logs")
+    suspend fun clearLogs()
 }
 
 @Dao
@@ -54,6 +67,12 @@ interface TaskDao {
 
     @Insert
     suspend fun insertAll(tasks: List<TaskItem>)
+
+    @Delete
+    suspend fun delete(task: TaskItem)
+
+    @Query("DELETE FROM tasks")
+    suspend fun clearTasks()
 }
 
 @Dao
@@ -72,6 +91,12 @@ interface PlanDao {
 
     @Query("SELECT COUNT(*) FROM plan_blocks WHERE epochDay = :epochDay AND title = :title")
     suspend fun countByTitle(epochDay: Long, title: String): Int
+
+    @Delete
+    suspend fun delete(block: PlanBlock)
+
+    @Query("DELETE FROM plan_blocks")
+    suspend fun clearPlans()
 }
 
 @Dao
@@ -84,4 +109,10 @@ interface NoteDao {
 
     @Insert
     suspend fun insertAll(notes: List<NoteEntry>)
+
+    @Query("DELETE FROM notes WHERE habitId = :habitId")
+    suspend fun deleteFor(habitId: Long)
+
+    @Query("DELETE FROM notes")
+    suspend fun clearNotes()
 }

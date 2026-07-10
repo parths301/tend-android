@@ -48,6 +48,7 @@ import com.tend.app.ui.theme.Ink
 import com.tend.app.ui.theme.Muted
 import com.tend.app.ui.theme.SegBg
 import com.tend.app.ui.theme.SpaceGrotesk
+import com.tend.app.ui.theme.Terracotta
 import com.tend.app.ui.theme.Track
 import com.tend.app.domain.Time
 import java.time.Instant
@@ -165,6 +166,26 @@ fun DetailScreen(vm: MainViewModel) {
                     }
                 }
             }
+        }
+
+        // Danger zone — two taps to delete, history and notes included
+        var confirmDelete by remember { mutableStateOf(false) }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .border(1.dp, if (confirmDelete) Terracotta else Border, RoundedCornerShape(14.dp))
+                .tapNoRipple {
+                    if (confirmDelete) vm.deleteHabit(h.habit.id) else confirmDelete = true
+                }
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                if (confirmDelete) "Tap again to delete \"${h.habit.name}\" and its history"
+                else "Delete habit",
+                fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                color = if (confirmDelete) Terracotta else Muted,
+            )
         }
     }
 }

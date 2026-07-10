@@ -135,7 +135,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val models: StateFlow<ModelsUi> = modelsState.asStateFlow()
 
     init {
-        viewModelScope.launch { repo.seedIfEmpty(today) }
+        // Early builds seeded demo data; clear it once so the app runs on real data only.
+        viewModelScope.launch {
+            repo.purgeLegacyDemoData()
+            TendWidgets.refresh(getApplication())
+        }
     }
 
     // ── navigation ──────────────────────────────────────────────
@@ -164,6 +168,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleTask(task: TaskItem) = viewModelScope.launch { repo.toggleTask(task) }
     fun togglePlan(block: PlanBlock) = viewModelScope.launch { repo.togglePlan(block) }
+
+    fun addHabit(name: String, category: String, type: String, goal: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            repo.addHabit(trimmed, category, goal.trim().ifEmpty { "Daily" }, type)
+            TendWidgets.refresh(getApplication())
+        }
+    }
+
+    fun deleteHabit(habitId: Long) {
+        viewModelScope.launch {
+            repo.deleteHabit(habitId)
+            shellState.update { it.copy(tab = Tab.Today) }
+            TendWidgets.refresh(getApplication())
+        }
+    }
+
+    fun addTask(title: String, group: String) {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch { repo.addTask(trimmed, group) }
+    }
+
+    fun deleteTask(task: TaskItem) = viewModelScope.launch { repo.deleteTask(task) }
+
+    fun addPlanBlock(title: String, startMin: Int, durationMin: Int, kind: String) {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch { repo.addPlanBlock(today, startMin, startMin + durationMin, trimmed, kind) }
+    }
+
+    fun deletePlanBlock(block: PlanBlock) = viewModelScope.launch { repo.deletePlanBlock(block) }
 
     fun addNote(text: String) {
         val trimmed = text.trim()
@@ -301,14 +338,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 delay(550)
                 val title = "Inbox zero + admin"
-                if (!repo.hasPlanBlock(today, title)) {
+                val added = if (!repo.hasPlanBlock(today, title)) {
                     repo.addPlanBlock(today, 11 * 60, 11 * 60 + 45, title, kind = "focus")
+                    true
+                } else {
+                    false
                 }
                 push(
                     ChatMsg(
                         true,
-                        "Your morning is blocked: Stretch 8:00, Deep Work 8:30–10:00, standup 10:15. " +
-                            "I slotted \"$title\" at 11:00 — check the Plan tab."
+                        if (added) "Done — I blocked \"$title\" at 11:00 for 45 minutes. Check the Plan tab."
+                        else "\"$title\" is already on today's plan. Anything else to slot in?"
                     )
                 )
             } finally {

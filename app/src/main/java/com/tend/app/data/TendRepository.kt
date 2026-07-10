@@ -16,7 +16,19 @@ class TendRepository(private val db: AppDatabase) {
     fun planFor(day: Long): Flow<List<PlanBlock>> = db.planDao().forDay(day)
     fun notesFor(habitId: Long): Flow<List<NoteEntry>> = db.noteDao().forHabit(habitId)
 
-    suspend fun seedIfEmpty(today: Long) = Seed.seedIfEmpty(db, today)
+    /**
+     * Early builds shipped with seeded demo data. If this database still
+     * carries that demo state, wipe it once so the app starts clean.
+     */
+    suspend fun purgeLegacyDemoData() {
+        val legacy = db.habitDao().habitById(1L)?.name == "Morning Stretch"
+        if (!legacy) return
+        db.noteDao().clearNotes()
+        db.planDao().clearPlans()
+        db.taskDao().clearTasks()
+        db.habitDao().clearLogs()
+        db.habitDao().clearHabits()
+    }
 
     /**
      * Check habits toggle on/off. Time habits accumulate 30-minute chunks and
@@ -52,6 +64,16 @@ class TendRepository(private val db: AppDatabase) {
 
     suspend fun togglePlan(block: PlanBlock) = db.planDao().update(block.copy(done = !block.done))
 
+    suspend fun deleteTask(task: TaskItem) = db.taskDao().delete(task)
+
+    suspend fun deletePlanBlock(block: PlanBlock) = db.planDao().delete(block)
+
+    suspend fun deleteHabit(habitId: Long) {
+        db.noteDao().deleteFor(habitId)
+        db.habitDao().deleteLogsFor(habitId)
+        db.habitDao().deleteHabit(habitId)
+    }
+
     suspend fun addTask(title: String, group: String = "PERSONAL") =
         db.taskDao().insert(TaskItem(title = title, groupName = group, sortOrder = 999))
 
@@ -64,7 +86,7 @@ class TendRepository(private val db: AppDatabase) {
     suspend fun addNote(habitId: Long, text: String) =
         db.noteDao().insert(NoteEntry(habitId = habitId, timestamp = System.currentTimeMillis(), text = text))
 
-    suspend fun addHabit(name: String, category: String, goal: String) {
+    suspend fun addHabit(name: String, category: String, goal: String, type: String = "check") {
         val palette = listOf(0xFFD96F4E, 0xFF7D74C9, 0xFF2F9C82, 0xFFC9931F)
         val glyph = name.split(" ").take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }
             .joinToString("").ifEmpty { "HB" }
@@ -74,7 +96,7 @@ class TendRepository(private val db: AppDatabase) {
                 category = category,
                 colorHex = palette[(name.hashCode() and 0x7FFFFFFF) % palette.size],
                 glyph = glyph.take(2),
-                type = "check",
+                type = type,
                 goal = goal,
                 sortOrder = 99,
             )
