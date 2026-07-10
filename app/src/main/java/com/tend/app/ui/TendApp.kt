@@ -42,13 +42,11 @@ import com.tend.app.ui.screens.SettingsScreen
 import com.tend.app.ui.screens.StatsScreen
 import com.tend.app.ui.screens.TasksScreen
 import com.tend.app.ui.screens.TodayScreen
-import com.tend.app.ui.screens.WidgetsScreen
 import com.tend.app.ui.theme.CardBorder
 import com.tend.app.ui.theme.Cream
 import com.tend.app.ui.theme.Faint
 import com.tend.app.ui.theme.Ink
 import com.tend.app.ui.theme.TerracottaLight
-import com.tend.app.ui.theme.WidgetBgTop
 import kotlin.math.abs
 
 @Composable
@@ -56,11 +54,10 @@ fun TendApp(vm: MainViewModel = viewModel()) {
     val shell by vm.shell.collectAsStateWithLifecycle()
     val showAiBar by vm.showAiBar.collectAsStateWithLifecycle()
 
-    val darkScreen = shell.tab == Tab.Widgets
     Box(
         Modifier
             .fillMaxSize()
-            .background(if (darkScreen) WidgetBgTop else Cream)
+            .background(Cream)
     ) {
         Column(Modifier.fillMaxSize().systemBarsPadding()) {
 
@@ -80,40 +77,30 @@ fun TendApp(vm: MainViewModel = viewModel()) {
                         )
                     }
             ) {
-                if (shell.tab == Tab.Widgets) {
-                    // Widgets manages its own scrolling so the dark gradient
-                    // always fills the viewport.
-                    WidgetsScreen(vm)
-                } else {
-                    key(shell.tab) {
-                        Column(
-                            Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                        ) {
-                            when (shell.tab) {
-                                Tab.Today -> TodayScreen(vm)
-                                Tab.Plan -> PlanScreen(vm)
-                                Tab.Tasks -> TasksScreen(vm)
-                                Tab.Stats -> StatsScreen(vm)
-                                Tab.Detail -> DetailScreen(vm)
-                                Tab.Settings -> SettingsScreen(vm)
-                                Tab.Widgets -> {}
-                            }
+                key(shell.tab) {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        when (shell.tab) {
+                            Tab.Today -> TodayScreen(vm)
+                            Tab.Plan -> PlanScreen(vm)
+                            Tab.Tasks -> TasksScreen(vm)
+                            Tab.Stats -> StatsScreen(vm)
+                            Tab.Detail -> DetailScreen(vm)
+                            Tab.Settings -> SettingsScreen(vm)
                         }
                     }
                 }
             }
 
-            val aiBarVisible = showAiBar &&
-                shell.tab != Tab.Widgets && shell.tab != Tab.Detail && shell.tab != Tab.Settings
+            val aiBarVisible = showAiBar && shell.tab != Tab.Detail && shell.tab != Tab.Settings
             if (aiBarVisible) {
                 AiBar { vm.openAi() }
             }
 
-            if (shell.tab != Tab.Widgets) {
-                NavBar(current = shell.tab, onSelect = vm::selectTab)
-            }
+            NavBar(current = shell.tab, onSelect = vm::selectTab)
         }
 
         if (shell.aiOpen) {

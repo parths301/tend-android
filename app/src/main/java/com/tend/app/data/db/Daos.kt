@@ -18,6 +18,13 @@ interface HabitDao {
     @Query("SELECT * FROM habit_logs WHERE habitId = :habitId AND epochDay = :epochDay LIMIT 1")
     suspend fun logFor(habitId: Long, epochDay: Long): HabitLog?
 
+    // One-shot reads for home-screen widgets (no Flow collection outside the app UI)
+    @Query("SELECT * FROM habits ORDER BY sortOrder")
+    suspend fun habitsOnce(): List<Habit>
+
+    @Query("SELECT * FROM habit_logs")
+    suspend fun logsOnce(): List<HabitLog>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertLog(log: HabitLog)
 

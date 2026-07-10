@@ -4,8 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tend.app.ai.AiAction
+import com.tend.app.ai.AiClient
 import com.tend.app.ai.AiProtocol
-import com.tend.app.ai.ClaudeClient
 import com.tend.app.data.SettingsRepository
 import com.tend.app.data.TendRepository
 import com.tend.app.data.db.AppDatabase
@@ -15,6 +15,7 @@ import com.tend.app.data.db.NoteEntry
 import com.tend.app.data.db.PlanBlock
 import com.tend.app.data.db.TaskItem
 import com.tend.app.domain.Streaks
+import com.tend.app.widget.TendWidgets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -32,7 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
-enum class Tab { Today, Plan, Tasks, Stats, Widgets, Detail, Settings }
+enum class Tab { Today, Plan, Tasks, Stats, Detail, Settings }
 enum class HabitView { Grid, Week }
 
 /** A habit joined with everything derived from its log history. */
@@ -49,6 +50,13 @@ data class HabitUi(
 
 data class ChatMsg(val fromAi: Boolean, val text: String)
 
+/** Models available to the saved key, fetched from the provider. */
+data class ModelsUi(
+    val loading: Boolean = false,
+    val models: List<String> = emptyList(),
+    val error: String? = null,
+)
+
 data class Shell(
     val tab: Tab = Tab.Today,
     val view: HabitView = HabitView.Grid,
@@ -63,7 +71,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = TendRepository(AppDatabase.get(app))
     val settings = SettingsRepository(app)
-    private val claude = ClaudeClient()
+    private val ai = AiClient()
 
     val todayDate: LocalDate = LocalDate.now()
     val today: Long = todayDate.toEpochDay()
@@ -110,8 +118,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         settings.heatmapWeeks.stateIn(viewModelScope, SharingStarted.Eagerly, 17)
     val showAiBar: StateFlow<Boolean> =
         settings.showAiBar.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val provider: StateFlow<String> =
+        settings.provider.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsRepository.PROVIDER_GEMINI)
     val model: StateFlow<String> =
-        settings.model.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsRepository.DEFAULT_MODEL)
+        settings.model.stateIn(
+            viewModelScope, SharingStarted.Eagerly,
+            SettingsRepository.defaultModel(SettingsRepository.PROVIDER_GEMINI),
+        )
+
+    /** API key for the currently selected provider. */
+    val apiKey: StateFlow<String> =
+        combine(settings.provider, settings.apiKeys) { p, keys -> keys[p].orEmpty() }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    private val modelsState = MutableStateFlow(ModelsUi())
+    val models: StateFlow<ModelsUi> = modelsState.asStateFlow()
 
     init {
         viewModelScope.launch { repo.seedIfEmpty(today) }
@@ -135,7 +156,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ── data actions ────────────────────────────────────────────
     fun toggleHabit(habitId: Long) {
         val habit = habits.value.firstOrNull { it.habit.id == habitId }?.habit ?: return
-        viewModelScope.launch { repo.toggleHabitToday(habit, today) }
+        viewModelScope.launch {
+            repo.toggleHabitToday(habit, today)
+            TendWidgets.refresh(getApplication())
+        }
     }
 
     fun toggleTask(task: TaskItem) = viewModelScope.launch { repo.toggleTask(task) }
@@ -152,7 +176,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setHeatmapWeeks(weeks: Int) = viewModelScope.launch { settings.setHeatmapWeeks(weeks) }
     fun setShowAiBar(show: Boolean) = viewModelScope.launch { settings.setShowAiBar(show) }
     fun setModel(model: String) = viewModelScope.launch { settings.setModel(model) }
-    fun setApiKey(key: String) = settings.setApiKey(key)
+
+    fun setProvider(newProvider: String) {
+        viewModelScope.launch {
+            settings.setProvider(newProvider)
+            refreshModelsFor(newProvider)
+        }
+    }
+
+    fun setApiKey(key: String) {
+        val p = provider.value
+        settings.setApiKey(p, key)
+        refreshModelsFor(p)
+    }
+
+    /** Fetch the model list for the current provider's saved key. */
+    fun refreshModels() = refreshModelsFor(provider.value)
+
+    private fun refreshModelsFor(p: String) {
+        val key = settings.apiKeys.value[p].orEmpty()
+        if (key.isBlank()) {
+            modelsState.value = ModelsUi()
+            return
+        }
+        modelsState.value = ModelsUi(loading = true)
+        viewModelScope.launch {
+            try {
+                val list = withContext(Dispatchers.IO) { ai.listModels(p, key) }
+                modelsState.value = ModelsUi(models = list)
+                if (list.isNotEmpty() && model.value !in list) {
+                    val preferred = SettingsRepository.defaultModel(p)
+                    settings.setModel(if (preferred in list) preferred else list.first())
+                }
+            } catch (e: Exception) {
+                modelsState.value = ModelsUi(error = e.message?.take(120) ?: "Couldn't fetch models")
+            }
+        }
+    }
 
     // ── Ask Tend ────────────────────────────────────────────────
     fun openAi() {
@@ -180,9 +240,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         shellState.update { it.copy(aiThinking = true) }
         viewModelScope.launch {
             try {
-                val key = settings.apiKey.value
+                val key = apiKey.value
                 val result = if (key.isNotBlank()) {
-                    runClaude(key) ?: run {
+                    runRemote(provider.value, key) ?: run {
                         delay(400)
                         AiProtocol.simulate(input)
                     }
@@ -198,14 +258,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun runClaude(key: String): com.tend.app.ai.AiResult? =
+    private suspend fun runRemote(aiProvider: String, key: String): com.tend.app.ai.AiResult? =
         withContext(Dispatchers.IO) {
             try {
                 val history = chatState.value.map { it.fromAi to it.text }
-                val raw = claude.complete(key, model.value, AiProtocol.systemPrompt(stateSummary()), history)
+                val raw = ai.complete(aiProvider, key, model.value, AiProtocol.systemPrompt(stateSummary()), history)
                 AiProtocol.parse(raw) ?: com.tend.app.ai.AiResult(raw.take(500), emptyList())
             } catch (e: Exception) {
-                push(ChatMsg(true, "Couldn't reach Claude (${e.message?.take(80) ?: "network error"}) — handling it locally instead."))
+                val label = SettingsRepository.providerLabel(aiProvider)
+                push(ChatMsg(true, "Couldn't reach $label (${e.message?.take(80) ?: "network error"}) — handling it locally instead."))
                 null
             }
         }
@@ -215,7 +276,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             is AiAction.AddTask -> repo.addTask(action.title, action.group)
             is AiAction.AddPlanBlock ->
                 repo.addPlanBlock(today, action.startMin, action.startMin + action.durationMin, action.title)
-            is AiAction.AddHabit -> repo.addHabit(action.name, action.category, action.goal)
+            is AiAction.AddHabit -> {
+                repo.addHabit(action.name, action.category, action.goal)
+                TendWidgets.refresh(getApplication())
+            }
         }
     }
 

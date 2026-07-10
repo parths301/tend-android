@@ -13,15 +13,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tend.app.MainViewModel
 import com.tend.app.Tab
+import com.tend.app.data.SettingsRepository
 import com.tend.app.ui.components.Kicker
 import com.tend.app.ui.components.ScreenTitle
 import com.tend.app.ui.components.TendCard
@@ -45,16 +47,27 @@ import com.tend.app.ui.theme.Cream
 import com.tend.app.ui.theme.Faint
 import com.tend.app.ui.theme.Ink
 import com.tend.app.ui.theme.Muted
+import com.tend.app.ui.theme.RowDivider
 import com.tend.app.ui.theme.SegBg
 import com.tend.app.ui.theme.SpaceGrotesk
+import com.tend.app.ui.theme.Teal
 import com.tend.app.ui.theme.Terracotta
 
 @Composable
 fun SettingsScreen(vm: MainViewModel) {
     val weeks by vm.heatmapWeeks.collectAsStateWithLifecycle()
     val showAiBar by vm.showAiBar.collectAsStateWithLifecycle()
+    val provider by vm.provider.collectAsStateWithLifecycle()
     val model by vm.model.collectAsStateWithLifecycle()
-    val savedKey by vm.settings.apiKey.collectAsStateWithLifecycle()
+    val savedKey by vm.apiKey.collectAsStateWithLifecycle()
+    val modelsUi by vm.models.collectAsStateWithLifecycle()
+
+    // Load the model list as soon as a key is available.
+    LaunchedEffect(provider, savedKey) {
+        if (savedKey.isNotEmpty() && modelsUi.models.isEmpty() && !modelsUi.loading && modelsUi.error == null) {
+            vm.refreshModels()
+        }
+    }
 
     Column(
         Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp),
@@ -81,37 +94,42 @@ fun SettingsScreen(vm: MainViewModel) {
         TendCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Add your Anthropic API key to power \"Ask Tend\" with Claude. " +
-                        "Without a key, Tend uses a built-in offline assistant. " +
-                        "The key is stored encrypted on this device only.",
+                    "Pick a provider and paste its API key to power \"Ask Tend\". " +
+                        "Available models load automatically. Without a key, Tend uses a " +
+                        "built-in offline assistant. Keys are stored encrypted on this device only.",
                     fontSize = 12.5.sp, color = Muted, lineHeight = 18.sp,
                 )
 
-                var keyInput by rememberSaveable(savedKey) { mutableStateOf(savedKey) }
-                FieldLabel("Anthropic API key")
+                FieldLabel("Provider")
+                Row(Modifier.background(SegBg, RoundedCornerShape(12.dp)).padding(3.dp)) {
+                    ProviderButton(
+                        Modifier.weight(1f), "Gemini",
+                        provider == SettingsRepository.PROVIDER_GEMINI,
+                    ) { vm.setProvider(SettingsRepository.PROVIDER_GEMINI) }
+                    ProviderButton(
+                        Modifier.weight(1f), "Claude",
+                        provider == SettingsRepository.PROVIDER_ANTHROPIC,
+                    ) { vm.setProvider(SettingsRepository.PROVIDER_ANTHROPIC) }
+                }
+
+                var keyInput by rememberSaveable(provider, savedKey) { mutableStateOf(savedKey) }
+                FieldLabel("${SettingsRepository.providerLabel(provider)} API key")
                 InputBox(
                     value = keyInput,
                     onChange = { keyInput = it },
-                    placeholder = "sk-ant-…",
+                    placeholder = SettingsRepository.keyPlaceholder(provider),
                     visualTransformation = if (keyInput == savedKey && savedKey.isNotEmpty())
                         PasswordVisualTransformation() else VisualTransformation.None,
                 )
-
-                var modelInput by rememberSaveable(model) { mutableStateOf(model) }
-                FieldLabel("Model")
-                InputBox(value = modelInput, onChange = { modelInput = it }, placeholder = "claude-opus-4-8")
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(
                         Modifier
                             .background(Ink, RoundedCornerShape(99.dp))
-                            .tapNoRipple {
-                                vm.setApiKey(keyInput)
-                                vm.setModel(modelInput)
-                            }
+                            .tapNoRipple { vm.setApiKey(keyInput) }
                             .padding(horizontal = 16.dp, vertical = 9.dp)
                     ) {
-                        Text("Save", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Cream)
+                        Text("Save key", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Cream)
                     }
                     if (savedKey.isNotEmpty()) {
                         Box(
@@ -124,12 +142,47 @@ fun SettingsScreen(vm: MainViewModel) {
                         }
                     }
                 }
-                Text(
-                    if (savedKey.isNotEmpty()) "✓ Key saved — Ask Tend is using Claude ($model)"
-                    else "No key — Ask Tend runs in offline mode",
-                    fontSize = 11.5.sp,
-                    color = if (savedKey.isNotEmpty()) com.tend.app.ui.theme.Teal else Faint,
-                )
+
+                // ── model picker — appears once a key is saved ──
+                if (savedKey.isNotEmpty()) {
+                    HorizontalDivider(color = RowDivider, thickness = 1.dp)
+                    FieldLabel("Model")
+                    when {
+                        modelsUi.loading -> Text("Fetching models…", fontSize = 12.5.sp, color = Faint)
+                        modelsUi.error != null -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "Couldn't load models: ${modelsUi.error}",
+                                    fontSize = 12.sp, color = Terracotta, lineHeight = 17.sp,
+                                )
+                                Box(
+                                    Modifier
+                                        .border(1.dp, Border, RoundedCornerShape(99.dp))
+                                        .tapNoRipple { vm.refreshModels() }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                ) {
+                                    Text("Retry", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
+                                }
+                            }
+                        }
+                        modelsUi.models.isEmpty() ->
+                            Text("No models available for this key.", fontSize = 12.5.sp, color = Faint)
+                        else -> Column {
+                            modelsUi.models.forEach { m ->
+                                ModelRow(name = m, selected = m == model) { vm.setModel(m) }
+                            }
+                        }
+                    }
+                    Text(
+                        "✓ Ask Tend is using ${SettingsRepository.providerLabel(provider)} ($model)",
+                        fontSize = 11.5.sp, color = Teal,
+                    )
+                } else {
+                    Text(
+                        "No key — Ask Tend runs in offline mode",
+                        fontSize = 11.5.sp, color = Faint,
+                    )
+                }
             }
         }
 
@@ -177,6 +230,66 @@ fun SettingsScreen(vm: MainViewModel) {
                 }
             }
         }
+
+        // ── Widgets ─────────────────────────────────────
+        SectionLabel("HOME SCREEN WIDGETS")
+        TendCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Add Tend widgets from your launcher", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Long-press your home screen → Widgets → Tend. " +
+                        "\"Today\" shows your habits with one-tap check-off; " +
+                        "\"Streak\" tracks your best running streak.",
+                    fontSize = 12.sp, color = Muted, lineHeight = 17.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderButton(modifier: Modifier, label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier
+            .background(if (selected) Card else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(9.dp))
+            .tapNoRipple(onClick)
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+            color = if (selected) Ink else Faint,
+        )
+    }
+}
+
+@Composable
+private fun ModelRow(name: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .tapNoRipple(onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(16.dp)
+                .then(
+                    if (selected) Modifier.background(Ink, RoundedCornerShape(50))
+                    else Modifier.border(1.5.dp, Border, RoundedCornerShape(50))
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) Text("✓", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Cream)
+        }
+        Text(
+            name,
+            fontSize = 12.5.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) Ink else Muted,
+            modifier = Modifier.padding(start = 10.dp),
+        )
     }
 }
 

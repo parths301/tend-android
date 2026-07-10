@@ -80,7 +80,7 @@ fun TodayScreen(vm: MainViewModel) {
                     fontSize = 12.5.sp, color = Muted,
                 )
             }
-            WidgetsButton { vm.selectTab(Tab.Widgets) }
+            SettingsButton { vm.selectTab(Tab.Settings) }
         }
 
         WeekStrip(habits, vm.today)
@@ -131,7 +131,7 @@ fun TodayScreen(vm: MainViewModel) {
 }
 
 @Composable
-private fun WidgetsButton(onClick: () -> Unit) {
+private fun SettingsButton(onClick: () -> Unit) {
     Box(
         Modifier
             .padding(top = 6.dp)
@@ -141,20 +141,8 @@ private fun WidgetsButton(onClick: () -> Unit) {
             .tapNoRipple(onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                Dot(Ink); Dot(Terracotta)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                Dot(Faint); Dot(Ink)
-            }
-        }
+        Text("⚙︎", fontSize = 17.sp, color = Ink)
     }
-}
-
-@Composable
-private fun Dot(color: Color) {
-    Box(Modifier.size(8.dp).background(color, RoundedCornerShape(2.5.dp)))
 }
 
 @Composable

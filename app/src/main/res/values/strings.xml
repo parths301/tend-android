@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Tend</string>
+
+    <string name="widget_today_label">Tend · Today</string>
+    <string name="widget_today_description">Today\'s habits with one-tap check-off</string>
+    <string name="widget_streak_label">Tend · Streak</string>
+    <string name="widget_streak_description">Your best running streak at a glance</string>
 </resources>

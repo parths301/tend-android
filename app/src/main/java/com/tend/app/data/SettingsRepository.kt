@@ -22,11 +22,19 @@ class SettingsRepository(context: Context) {
 
     private val heatmapWeeksKey = intPreferencesKey("heatmap_weeks")
     private val showAiBarKey = booleanPreferencesKey("show_ai_bar")
-    private val modelKey = stringPreferencesKey("claude_model")
+    private val providerKey = stringPreferencesKey("ai_provider")
+
+    private fun modelKey(provider: String) = stringPreferencesKey("model_$provider")
 
     val heatmapWeeks: Flow<Int> = store.data.map { it[heatmapWeeksKey] ?: 17 }
     val showAiBar: Flow<Boolean> = store.data.map { it[showAiBarKey] ?: true }
-    val model: Flow<String> = store.data.map { it[modelKey] ?: DEFAULT_MODEL }
+    val provider: Flow<String> = store.data.map { it[providerKey] ?: PROVIDER_GEMINI }
+
+    /** Selected model for the currently selected provider. */
+    val model: Flow<String> = store.data.map { prefs ->
+        val p = prefs[providerKey] ?: PROVIDER_GEMINI
+        prefs[modelKey(p)] ?: defaultModel(p)
+    }
 
     suspend fun setHeatmapWeeks(weeks: Int) {
         store.edit { it[heatmapWeeksKey] = weeks.coerceIn(8, 17) }
@@ -36,11 +44,19 @@ class SettingsRepository(context: Context) {
         store.edit { it[showAiBarKey] = show }
     }
 
-    suspend fun setModel(model: String) {
-        store.edit { it[modelKey] = model.trim().ifEmpty { DEFAULT_MODEL } }
+    suspend fun setProvider(provider: String) {
+        store.edit { it[providerKey] = provider }
     }
 
-    // BYOK Anthropic API key lives in EncryptedSharedPreferences, never in plain storage.
+    suspend fun setModel(model: String) {
+        store.edit { prefs ->
+            val p = prefs[providerKey] ?: PROVIDER_GEMINI
+            prefs[modelKey(p)] = model.trim().ifEmpty { defaultModel(p) }
+        }
+    }
+
+    // BYOK API keys live in EncryptedSharedPreferences, never in plain storage.
+    // One key per provider, so switching providers doesn't lose the other key.
     private val securePrefs = EncryptedSharedPreferences.create(
         appContext,
         "tend_secure",
@@ -49,16 +65,36 @@ class SettingsRepository(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
     )
 
-    private val apiKeyState = MutableStateFlow(securePrefs.getString(API_KEY_PREF, "") ?: "")
-    val apiKey: StateFlow<String> = apiKeyState.asStateFlow()
+    private fun loadKeys(): Map<String, String> = mapOf(
+        PROVIDER_ANTHROPIC to (securePrefs.getString("anthropic_api_key", "") ?: ""),
+        PROVIDER_GEMINI to (securePrefs.getString("gemini_api_key", "") ?: ""),
+    )
 
-    fun setApiKey(key: String) {
-        securePrefs.edit().putString(API_KEY_PREF, key.trim()).apply()
-        apiKeyState.value = key.trim()
+    private val keysState = MutableStateFlow(loadKeys())
+    val apiKeys: StateFlow<Map<String, String>> = keysState.asStateFlow()
+
+    fun setApiKey(provider: String, key: String) {
+        securePrefs.edit().putString("${provider}_api_key", key.trim()).apply()
+        keysState.value = loadKeys()
     }
 
     companion object {
-        const val DEFAULT_MODEL = "claude-opus-4-8"
-        private const val API_KEY_PREF = "anthropic_api_key"
+        const val PROVIDER_ANTHROPIC = "anthropic"
+        const val PROVIDER_GEMINI = "gemini"
+
+        fun defaultModel(provider: String): String = when (provider) {
+            PROVIDER_GEMINI -> "gemini-2.5-flash"
+            else -> "claude-opus-4-8"
+        }
+
+        fun providerLabel(provider: String): String = when (provider) {
+            PROVIDER_GEMINI -> "Gemini"
+            else -> "Claude"
+        }
+
+        fun keyPlaceholder(provider: String): String = when (provider) {
+            PROVIDER_GEMINI -> "AIza…"
+            else -> "sk-ant-…"
+        }
     }
 }
