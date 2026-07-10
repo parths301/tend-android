@@ -1,0 +1,30 @@
+# Gradle
+.gradle/
+build/
+*.apk
+*.aar
+.gradle-wrapper/
+
+# Android
+.idea/
+*.iml
+*.iws
+*.ipr
+*.class
+*.log
+local.properties
+
+# IDE
+.vscode/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Project-specific
+app/.cxx/
+app/intermediates/
+
+# Build outputs
+*.jar
+*.zip
