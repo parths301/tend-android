@@ -29,7 +29,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextStyle as ComposeTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -276,7 +276,7 @@ fun DialogInput(value: String, onChange: (String) -> Unit, placeholder: String) 
         BasicTextField(
             value = value,
             onValueChange = onChange,
-            textStyle = TextStyle(fontSize = 13.sp, color = Ink),
+            textStyle = ComposeTextStyle(fontSize = 13.sp, color = Ink),
             modifier = Modifier.fillMaxWidth(),
         )
         if (value.isEmpty()) Text(placeholder, fontSize = 13.sp, color = Faint)
