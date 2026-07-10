@@ -51,10 +51,10 @@ fun StatsScreen(vm: MainViewModel) {
     val habits by vm.habits.collectAsStateWithLifecycle()
     val today = vm.today
 
-    // Derived stats
+    // Derived stats — a habit only counts on days it already existed
     val bestHabit = habits.maxByOrNull { it.best }
     val weekDays = (today - 6)..today
-    val possible = habits.size * 7
+    val possible = weekDays.sumOf { day -> habits.count { it.habit.createdDay <= day } }
     val weekDone = habits.sumOf { h -> weekDays.count { it in h.doneDays } }
     val weekPct = if (possible > 0) weekDone * 100 / possible else 0
     val timeHabits = habits.filter { it.habit.type == "time" }

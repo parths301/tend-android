@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.tend.app.ai.AiAction
 import com.tend.app.ai.AiClient
 import com.tend.app.ai.AiProtocol
+import com.tend.app.data.CalEvent
+import com.tend.app.data.CalendarRepository
 import com.tend.app.data.SettingsRepository
 import com.tend.app.data.TendRepository
 import com.tend.app.data.db.AppDatabase
@@ -15,6 +17,8 @@ import com.tend.app.data.db.NoteEntry
 import com.tend.app.data.db.PlanBlock
 import com.tend.app.data.db.TaskItem
 import com.tend.app.domain.Streaks
+import com.tend.app.notif.Notifications
+import com.tend.app.notif.ReminderScheduler
 import com.tend.app.widget.TendWidgets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -25,7 +29,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -64,6 +70,7 @@ data class Shell(
     val aiOpen: Boolean = false,
     val aiThinking: Boolean = false,
     val detailHabitId: Long = 1L,
+    val planDay: Long = LocalDate.now().toEpochDay(),
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -71,6 +78,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = TendRepository(AppDatabase.get(app))
     val settings = SettingsRepository(app)
+    private val calendar = CalendarRepository(app)
     private val ai = AiClient()
 
     val todayDate: LocalDate = LocalDate.now()
@@ -97,7 +105,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     minutesToday = minutes[today] ?: 0,
                     streak = Streaks.current(doneDays, today),
                     best = Streaks.best(doneDays),
-                    rate30 = Streaks.rate(doneDays, today),
+                    rate30 = Streaks.rate(doneDays, today, sinceDay = habit.createdDay),
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -105,8 +113,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val tasks: StateFlow<List<TaskItem>> =
         repo.tasks().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val plan: StateFlow<List<PlanBlock>> =
-        repo.planFor(today).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val plan: StateFlow<List<PlanBlock>> = shellState
+        .map { it.planDay }
+        .distinctUntilChanged()
+        .flatMapLatest { repo.planFor(it) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val calendarRefresh = MutableStateFlow(0)
+    val calendarEvents: StateFlow<List<CalEvent>> =
+        combine(
+            shellState.map { it.planDay }.distinctUntilChanged(),
+            settings.calendarEnabled,
+            calendarRefresh,
+        ) { day, enabled, _ -> day to enabled }
+            .flatMapLatest { (day, enabled) ->
+                flow { emit(if (enabled) calendar.eventsFor(day) else emptyList()) }
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val notes: StateFlow<List<NoteEntry>> = shellState
         .map { it.detailHabitId }
@@ -125,6 +148,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope, SharingStarted.Eagerly,
             SettingsRepository.defaultModel(SettingsRepository.PROVIDER_GEMINI),
         )
+    val customCategories: StateFlow<List<String>> =
+        settings.customCategories.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val notificationsEnabled: StateFlow<Boolean> =
+        settings.notificationsEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val checkinEnabled: StateFlow<Boolean> =
+        settings.checkinEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val checkinMin: StateFlow<Int> =
+        settings.checkinMin.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsRepository.DEFAULT_CHECKIN_MIN)
+    val calendarEnabled: StateFlow<Boolean> =
+        settings.calendarEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /** API key for the currently selected provider. */
     val apiKey: StateFlow<String> =
@@ -134,11 +167,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val modelsState = MutableStateFlow(ModelsUi())
     val models: StateFlow<ModelsUi> = modelsState.asStateFlow()
 
+    private val autoPlanningState = MutableStateFlow(false)
+    val autoPlanning: StateFlow<Boolean> = autoPlanningState.asStateFlow()
+    private val autoPlanMessageState = MutableStateFlow<String?>(null)
+    val autoPlanMessage: StateFlow<String?> = autoPlanMessageState.asStateFlow()
+
     init {
-        // Early builds seeded demo data; clear it once so the app runs on real data only.
+        Notifications.ensureChannels(app)
         viewModelScope.launch {
+            // Early builds seeded demo data; clear it once so the app runs on real data only.
             repo.purgeLegacyDemoData()
+            repo.materializeHabitBlocks(today)
             TendWidgets.refresh(getApplication())
+            ReminderScheduler.reschedule(getApplication())
         }
     }
 
@@ -147,6 +188,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun openDetail(habitId: Long) = shellState.update { it.copy(tab = Tab.Detail, detailHabitId = habitId) }
     fun setView(view: HabitView) = shellState.update { it.copy(view = view) }
     fun setFilter(filter: String) = shellState.update { it.copy(filter = filter) }
+
+    fun shiftPlanDay(delta: Long) = shellState.update { it.copy(planDay = it.planDay + delta) }
+    fun planToday() = shellState.update { it.copy(planDay = today) }
+
+    /** Handles notification deep links; called from the shell on resume. */
+    fun consumeDeepLink() {
+        when (DeepLinks.pending) {
+            MainActivity.DEEPLINK_PLAN_TOMORROW ->
+                shellState.update { it.copy(tab = Tab.Plan, planDay = today + 1, aiOpen = false) }
+        }
+        DeepLinks.pending = null
+    }
 
     private val swipeTabs = listOf(Tab.Today, Tab.Plan, Tab.Tasks, Tab.Stats)
     fun swipe(direction: Int) {
@@ -169,12 +222,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleTask(task: TaskItem) = viewModelScope.launch { repo.toggleTask(task) }
     fun togglePlan(block: PlanBlock) = viewModelScope.launch { repo.togglePlan(block) }
 
-    fun addHabit(name: String, category: String, type: String, goal: String) {
+    fun addHabit(name: String, category: String, type: String, goal: String, reminderMin: Int? = null) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
-            repo.addHabit(trimmed, category, goal.trim().ifEmpty { "Daily" }, type)
+            repo.addHabit(
+                trimmed, category,
+                goal.trim().ifEmpty { "Daily" },
+                type,
+                createdDay = today,
+                reminderMin = reminderMin,
+            )
+            repo.materializeHabitBlocks(today)
             TendWidgets.refresh(getApplication())
+            ReminderScheduler.reschedule(getApplication())
+        }
+    }
+
+    fun updateHabit(habit: Habit) {
+        viewModelScope.launch {
+            repo.updateHabit(habit)
+            repo.materializeHabitBlocks(today)
+            TendWidgets.refresh(getApplication())
+            ReminderScheduler.reschedule(getApplication())
         }
     }
 
@@ -183,22 +253,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             repo.deleteHabit(habitId)
             shellState.update { it.copy(tab = Tab.Today) }
             TendWidgets.refresh(getApplication())
+            ReminderScheduler.reschedule(getApplication())
         }
     }
 
-    fun addTask(title: String, group: String) {
+    fun addTask(title: String, group: String, dueDay: Long? = null, dueMin: Int? = null) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
-        viewModelScope.launch { repo.addTask(trimmed, group) }
+        viewModelScope.launch {
+            repo.addTask(trimmed, group, dueDay, dueMin)
+            ReminderScheduler.reschedule(getApplication())
+        }
     }
 
-    fun deleteTask(task: TaskItem) = viewModelScope.launch { repo.deleteTask(task) }
+    fun updateTask(task: TaskItem) {
+        viewModelScope.launch {
+            repo.updateTask(task)
+            ReminderScheduler.reschedule(getApplication())
+        }
+    }
+
+    fun deleteTask(task: TaskItem) = viewModelScope.launch {
+        repo.deleteTask(task)
+        ReminderScheduler.reschedule(getApplication())
+    }
 
     fun addPlanBlock(title: String, startMin: Int, durationMin: Int, kind: String) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
-        viewModelScope.launch { repo.addPlanBlock(today, startMin, startMin + durationMin, trimmed, kind) }
+        val day = shellState.value.planDay
+        viewModelScope.launch { repo.addPlanBlock(day, startMin, startMin + durationMin, trimmed, kind) }
     }
+
+    fun updatePlanBlock(block: PlanBlock) = viewModelScope.launch { repo.updatePlanBlock(block) }
 
     fun deletePlanBlock(block: PlanBlock) = viewModelScope.launch { repo.deletePlanBlock(block) }
 
@@ -209,10 +296,99 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.addNote(habitId, trimmed) }
     }
 
+    fun addCustomCategory(name: String) = viewModelScope.launch { settings.addCustomCategory(name) }
+
+    // ── auto-plan (AI) ──────────────────────────────────────────
+    fun clearAutoPlanMessage() {
+        autoPlanMessageState.value = null
+    }
+
+    fun autoPlan() {
+        val day = shellState.value.planDay
+        if (day != today || autoPlanningState.value) return
+        val key = apiKey.value
+        if (key.isBlank()) {
+            autoPlanMessageState.value =
+                "Auto-plan needs an AI key — add your ${SettingsRepository.providerLabel(provider.value)} key in Settings."
+            return
+        }
+        autoPlanningState.value = true
+        viewModelScope.launch {
+            try {
+                fun fmt(min: Int) = "%02d:%02d".format(min / 60, min % 60)
+                val fixedBlocks = repo.planForOnce(day).filter { it.source != "auto" }
+                val calEvents = if (settings.calendarEnabled.first()) calendar.eventsFor(day) else emptyList()
+                val busy = fixedBlocks.map { it.startMin to it.endMin } +
+                    calEvents.map { it.startMin to it.endMin }
+                val fixedDesc =
+                    fixedBlocks.map { "${fmt(it.startMin)}-${fmt(it.endMin)} ${it.title}" } +
+                        calEvents.map { "${fmt(it.startMin)}-${fmt(it.endMin)} ${it.title} (calendar)" }
+                val taskDesc = tasks.value.filter { !it.done }.map { it.title }
+                val habitDesc = habits.value.map {
+                    "${it.habit.name} — ${it.habit.type}, ${it.streak}-day streak" +
+                        if (it.doneToday) ", already done today" else ""
+                }
+
+                val prompt = AiProtocol.autoPlanPrompt(todayDate.toString(), fixedDesc, taskDesc, habitDesc)
+                val raw = withContext(Dispatchers.IO) {
+                    ai.complete(provider.value, key, model.value, prompt, listOf(false to "Plan my day."))
+                }
+                val parsed = AiProtocol.parseAutoPlan(raw)
+                if (parsed == null) {
+                    autoPlanMessageState.value = "Auto-plan returned something unexpected — try again."
+                    return@launch
+                }
+                val (reply, blocks) = parsed
+                val safe = AiProtocol.filterOverlaps(blocks, busy)
+                repo.replaceAutoPlan(
+                    day,
+                    safe.map {
+                        PlanBlock(
+                            epochDay = day,
+                            startMin = it.startMin,
+                            endMin = (it.startMin + it.durationMin).coerceAtMost(24 * 60),
+                            title = it.title,
+                            kind = it.kind,
+                            source = "auto",
+                        )
+                    },
+                )
+                autoPlanMessageState.value = reply
+            } catch (e: Exception) {
+                autoPlanMessageState.value = "Auto-plan failed: ${e.message?.take(100) ?: "network error"}"
+            } finally {
+                autoPlanningState.value = false
+            }
+        }
+    }
+
     // ── settings ────────────────────────────────────────────────
     fun setHeatmapWeeks(weeks: Int) = viewModelScope.launch { settings.setHeatmapWeeks(weeks) }
     fun setShowAiBar(show: Boolean) = viewModelScope.launch { settings.setShowAiBar(show) }
     fun setModel(model: String) = viewModelScope.launch { settings.setModel(model) }
+
+    fun setNotificationsEnabled(enabled: Boolean) = viewModelScope.launch {
+        settings.setNotificationsEnabled(enabled)
+        ReminderScheduler.reschedule(getApplication())
+    }
+
+    fun setCheckinEnabled(enabled: Boolean) = viewModelScope.launch {
+        settings.setCheckinEnabled(enabled)
+        ReminderScheduler.reschedule(getApplication())
+    }
+
+    fun setCheckinMin(min: Int) = viewModelScope.launch {
+        settings.setCheckinMin(min)
+        ReminderScheduler.reschedule(getApplication())
+    }
+
+    fun setCalendarEnabled(enabled: Boolean) = viewModelScope.launch {
+        settings.setCalendarEnabled(enabled)
+    }
+
+    fun refreshCalendar() {
+        calendarRefresh.update { it + 1 }
+    }
 
     fun setProvider(newProvider: String) {
         viewModelScope.launch {
@@ -315,11 +491,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun apply(action: AiAction) {
         when (action) {
-            is AiAction.AddTask -> repo.addTask(action.title, action.group)
+            is AiAction.AddTask -> {
+                repo.addTask(action.title, action.group)
+                ReminderScheduler.reschedule(getApplication())
+            }
             is AiAction.AddPlanBlock ->
-                repo.addPlanBlock(today, action.startMin, action.startMin + action.durationMin, action.title)
+                repo.addPlanBlock(today, action.startMin, action.startMin + action.durationMin, action.title, action.kind)
             is AiAction.AddHabit -> {
-                repo.addHabit(action.name, action.category, action.goal)
+                repo.addHabit(action.name, action.category, action.goal, createdDay = today)
                 TendWidgets.refresh(getApplication())
             }
         }
@@ -334,7 +513,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return "Habits:\n$habitLines\nOpen tasks: $openTasks\nToday's plan: $planLines"
     }
 
-    // ── suggestion chips (mirror the prototype's canned flows) ──
+    // ── suggestion chips (canned offline flows) ─────────────────
     fun chipPlanMorning() {
         if (shellState.value.aiThinking) return
         push(ChatMsg(false, "Plan my morning"))

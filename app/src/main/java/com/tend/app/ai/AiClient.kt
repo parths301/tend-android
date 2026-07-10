@@ -94,7 +94,7 @@ class AiClient {
             if (methods != null) {
                 for (j in 0 until methods.length()) if (methods.optString(j) == "generateContent") chat = true
             }
-            if (chat && name.startsWith("gemini-")) names.add(name)
+            if (chat && name.startsWith("gemini-") && !NON_TEXT.containsMatchIn(name)) names.add(name)
         }
         // Newest families first; the plain "flash" of the newest generation is the
         // sensible default, so surface it at the top.
@@ -193,5 +193,8 @@ class AiClient {
 
     private companion object {
         const val GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+        /** Non-text model ids to hide from the picker (chat protocol is text-only). */
+        val NON_TEXT = Regex("embed|image|imagen|audio|tts|live|veo|aqa|vision|robotics|computer-use")
     }
 }

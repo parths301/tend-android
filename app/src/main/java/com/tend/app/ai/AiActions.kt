@@ -5,7 +5,12 @@ import org.json.JSONObject
 /** Something the assistant wants to do to the user's data. */
 sealed class AiAction {
     data class AddTask(val title: String, val group: String) : AiAction()
-    data class AddPlanBlock(val title: String, val startMin: Int, val durationMin: Int) : AiAction()
+    data class AddPlanBlock(
+        val title: String,
+        val startMin: Int,
+        val durationMin: Int,
+        val kind: String = "event",
+    ) : AiAction()
     data class AddHabit(val name: String, val category: String, val goal: String) : AiAction()
 }
 
@@ -71,13 +76,12 @@ object AiProtocol {
                             group = a.optString("group", "PERSONAL").uppercase(),
                         )
                         "add_plan" -> {
-                            val start24 = a.optString("start", "12:00").split(":")
-                            val minutes = (start24.getOrNull(0)?.toIntOrNull() ?: 12) * 60 +
-                                (start24.getOrNull(1)?.toIntOrNull() ?: 0)
                             actions += AiAction.AddPlanBlock(
                                 title = a.optString("title"),
-                                startMin = minutes.coerceIn(0, 24 * 60 - 15),
+                                startMin = parseClock(a.optString("start", "12:00")),
                                 durationMin = a.optInt("durationMin", 30).coerceIn(5, 8 * 60),
+                                kind = a.optString("kind", "event").lowercase()
+                                    .takeIf { it in setOf("focus", "event", "habit") } ?: "event",
                             )
                         }
                         "add_habit" -> actions += AiAction.AddHabit(
@@ -91,6 +95,93 @@ object AiProtocol {
             if (reply.isBlank() && actions.isEmpty()) null else AiResult(reply, actions)
         } catch (e: Exception) {
             null
+        }
+    }
+
+    private fun parseClock(raw: String): Int {
+        val parts = raw.trim().split(":")
+        val minutes = (parts.getOrNull(0)?.toIntOrNull() ?: 12) * 60 +
+            (parts.getOrNull(1)?.take(2)?.toIntOrNull() ?: 0)
+        return minutes.coerceIn(0, 24 * 60 - 15)
+    }
+
+    // ── AI auto-plan ────────────────────────────────────────────
+
+    fun autoPlanPrompt(
+        dateLabel: String,
+        fixed: List<String>,
+        openTasks: List<String>,
+        habits: List<String>,
+    ): String = """
+        You are Tend's day planner. Build a realistic plan for TODAY ($dateLabel) as
+        time blocks between 08:00 and 21:00.
+
+        FIXED items that already occupy the timeline — you MUST NOT overlap any of
+        these, and you MUST NOT re-emit them:
+        ${fixed.joinToString("\n") { "- $it" }.ifEmpty { "- (none)" }}
+
+        Open tasks to schedule (fit the important-sounding ones, ~30-45 min each;
+        it's fine to leave some out if the day is full):
+        ${openTasks.joinToString("\n") { "- $it" }.ifEmpty { "- (none)" }}
+
+        Habits for context (already tracked; only schedule ones that clearly need a
+        session and are not already in the fixed list):
+        ${habits.joinToString("\n") { "- $it" }.ifEmpty { "- (none)" }}
+
+        Guidelines: group focus work in the morning where possible, add a lunch
+        break around 13:00 if free, leave 10-15 min gaps between blocks, nothing
+        after 21:00.
+
+        Respond ONLY with a single valid JSON object, no markdown fences:
+        {"reply": "<1-2 sentences summarising the plan>",
+         "blocks": [
+           {"title": "...", "start": "09:00", "durationMin": 45, "kind": "focus|event|habit"}
+         ]}
+        "start" must be 24-hour "HH:MM". Titles short (2-5 words).
+    """.trimIndent()
+
+    /** Parses the auto-plan response into plan-block actions. */
+    fun parseAutoPlan(raw: String): Pair<String, List<AiAction.AddPlanBlock>>? {
+        val cleaned = raw.trim()
+            .removePrefix("```json").removePrefix("```")
+            .removeSuffix("```").trim()
+        val start = cleaned.indexOf('{')
+        val end = cleaned.lastIndexOf('}')
+        if (start < 0 || end <= start) return null
+        return try {
+            val obj = JSONObject(cleaned.substring(start, end + 1))
+            val reply = obj.optString("reply", "Here's your day.")
+            val blocks = mutableListOf<AiAction.AddPlanBlock>()
+            val arr = obj.optJSONArray("blocks") ?: return null
+            for (i in 0 until arr.length()) {
+                val b = arr.optJSONObject(i) ?: continue
+                val title = b.optString("title").trim()
+                if (title.isEmpty()) continue
+                blocks += AiAction.AddPlanBlock(
+                    title = title,
+                    startMin = parseClock(b.optString("start", "09:00")),
+                    durationMin = b.optInt("durationMin", 30).coerceIn(10, 4 * 60),
+                    kind = b.optString("kind", "focus").lowercase()
+                        .takeIf { it in setOf("focus", "event", "habit") } ?: "focus",
+                )
+            }
+            reply to blocks
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Drops blocks that overlap any fixed (busy) interval. */
+    fun filterOverlaps(
+        blocks: List<AiAction.AddPlanBlock>,
+        busy: List<Pair<Int, Int>>,
+    ): List<AiAction.AddPlanBlock> {
+        val placed = mutableListOf<Pair<Int, Int>>()
+        return blocks.filter { block ->
+            val range = block.startMin to (block.startMin + block.durationMin)
+            val clash = (busy + placed).any { (s, e) -> range.first < e && s < range.second }
+            if (!clash) placed += range
+            !clash
         }
     }
 

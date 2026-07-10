@@ -1,18 +1,27 @@
 package com.tend.app.ui.screens
 
+import android.Manifest
+import android.app.AlarmManager
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -23,16 +32,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tend.app.MainViewModel
 import com.tend.app.Tab
@@ -40,6 +53,7 @@ import com.tend.app.data.SettingsRepository
 import com.tend.app.ui.components.Kicker
 import com.tend.app.ui.components.ScreenTitle
 import com.tend.app.ui.components.TendCard
+import com.tend.app.ui.components.TimeStepperRow
 import com.tend.app.ui.components.tapNoRipple
 import com.tend.app.ui.theme.Border
 import com.tend.app.ui.theme.Card
@@ -61,6 +75,12 @@ fun SettingsScreen(vm: MainViewModel) {
     val model by vm.model.collectAsStateWithLifecycle()
     val savedKey by vm.apiKey.collectAsStateWithLifecycle()
     val modelsUi by vm.models.collectAsStateWithLifecycle()
+    val notificationsEnabled by vm.notificationsEnabled.collectAsStateWithLifecycle()
+    val checkinEnabled by vm.checkinEnabled.collectAsStateWithLifecycle()
+    val checkinMin by vm.checkinMin.collectAsStateWithLifecycle()
+    val calendarEnabled by vm.calendarEnabled.collectAsStateWithLifecycle()
+
+    val context = LocalContext.current
 
     // Load the model list as soon as a key is available.
     LaunchedEffect(provider, savedKey) {
@@ -68,6 +88,23 @@ fun SettingsScreen(vm: MainViewModel) {
             vm.refreshModels()
         }
     }
+
+    val notifPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    var calendarGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val calendarPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            calendarGranted = granted
+            if (granted) {
+                vm.setCalendarEnabled(true)
+                vm.refreshCalendar()
+            }
+        }
 
     Column(
         Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp),
@@ -94,9 +131,8 @@ fun SettingsScreen(vm: MainViewModel) {
         TendCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Pick a provider and paste its API key to power \"Ask Tend\". " +
-                        "Available models load automatically. Without a key, Tend uses a " +
-                        "built-in offline assistant. Keys are stored encrypted on this device only.",
+                    "Pick a provider and paste its API key to power \"Ask Tend\" and Auto-plan. " +
+                        "Text models load automatically. Keys are stored encrypted on this device only.",
                     fontSize = 12.5.sp, color = Muted, lineHeight = 18.sp,
                 )
 
@@ -143,7 +179,7 @@ fun SettingsScreen(vm: MainViewModel) {
                     }
                 }
 
-                // ── model picker — appears once a key is saved ──
+                // ── model dropdown — appears once a key is saved ──
                 if (savedKey.isNotEmpty()) {
                     HorizontalDivider(color = RowDivider, thickness = 1.dp)
                     FieldLabel("Model")
@@ -166,15 +202,48 @@ fun SettingsScreen(vm: MainViewModel) {
                             }
                         }
                         modelsUi.models.isEmpty() ->
-                            Text("No models available for this key.", fontSize = 12.5.sp, color = Faint)
-                        else -> Column {
-                            modelsUi.models.forEach { m ->
-                                ModelRow(name = m, selected = m == model) { vm.setModel(m) }
+                            Text("No text models available for this key.", fontSize = 12.5.sp, color = Faint)
+                        else -> {
+                            var menuOpen by remember { mutableStateOf(false) }
+                            Box {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .background(Card, RoundedCornerShape(12.dp))
+                                        .border(1.dp, Border, RoundedCornerShape(12.dp))
+                                        .tapNoRipple { menuOpen = true }
+                                        .padding(horizontal = 12.dp, vertical = 11.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(model, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                                    Text("▾", fontSize = 13.sp, color = Muted)
+                                }
+                                DropdownMenu(
+                                    expanded = menuOpen,
+                                    onDismissRequest = { menuOpen = false },
+                                ) {
+                                    modelsUi.models.forEach { m ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    if (m == model) "$m  ✓" else m,
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = if (m == model) FontWeight.Bold else FontWeight.Medium,
+                                                )
+                                            },
+                                            onClick = {
+                                                vm.setModel(m)
+                                                menuOpen = false
+                                            },
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                     Text(
-                        "✓ Ask Tend is using ${SettingsRepository.providerLabel(provider)} ($model)",
+                        "✓ Using ${SettingsRepository.providerLabel(provider)} ($model)",
                         fontSize = 11.5.sp, color = Teal,
                     )
                 } else {
@@ -182,6 +251,142 @@ fun SettingsScreen(vm: MainViewModel) {
                         "No key — Ask Tend runs in offline mode",
                         fontSize = 11.5.sp, color = Faint,
                     )
+                }
+            }
+        }
+
+        // ── Notifications ───────────────────────────────
+        SectionLabel("NOTIFICATIONS")
+        TendCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Reminders", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Habit nudges and task due-time alerts",
+                            fontSize = 11.5.sp, color = Faint,
+                        )
+                    }
+                    Switch(
+                        checked = notificationsEnabled,
+                        onCheckedChange = { enabled ->
+                            if (enabled && Build.VERSION.SDK_INT >= 33 &&
+                                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                                PackageManager.PERMISSION_GRANTED
+                            ) {
+                                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                            vm.setNotificationsEnabled(enabled)
+                        },
+                        colors = SwitchDefaults.colors(checkedTrackColor = Ink, checkedThumbColor = Cream),
+                    )
+                }
+
+                if (notificationsEnabled) {
+                    val alarmManager = context.getSystemService(AlarmManager::class.java)
+                    val exactAllowed = Build.VERSION.SDK_INT < 31 || alarmManager.canScheduleExactAlarms()
+                    if (!exactAllowed) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "Exact timing is off — reminders may arrive a few minutes late.",
+                                fontSize = 11.5.sp, color = Terracotta, lineHeight = 16.sp,
+                                modifier = Modifier.weight(1f).padding(end = 10.dp),
+                            )
+                            Box(
+                                Modifier
+                                    .border(1.dp, Border, RoundedCornerShape(99.dp))
+                                    .tapNoRipple {
+                                        if (Build.VERSION.SDK_INT >= 31) {
+                                            context.startActivity(
+                                                Intent(
+                                                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                                    Uri.parse("package:${context.packageName}"),
+                                                )
+                                            )
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                            ) {
+                                Text("Allow", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+                            }
+                        }
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Nightly check-in", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Each evening: anything to add for tomorrow?",
+                                fontSize = 11.5.sp, color = Faint,
+                            )
+                        }
+                        Switch(
+                            checked = checkinEnabled,
+                            onCheckedChange = { vm.setCheckinEnabled(it) },
+                            colors = SwitchDefaults.colors(checkedTrackColor = Ink, checkedThumbColor = Cream),
+                        )
+                    }
+                    if (checkinEnabled) {
+                        TimeStepperRow(checkinMin, { vm.setCheckinMin(it) })
+                    }
+                }
+            }
+        }
+
+        // ── Calendar ────────────────────────────────────
+        SectionLabel("CALENDAR")
+        TendCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!calendarGranted) {
+                    Text(
+                        "Connect your device calendar to see events on the Plan timeline " +
+                            "and let Auto-plan schedule around them. Read-only.",
+                        fontSize = 12.5.sp, color = Muted, lineHeight = 18.sp,
+                    )
+                    Box(
+                        Modifier
+                            .background(Ink, RoundedCornerShape(99.dp))
+                            .tapNoRipple {
+                                calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                            }
+                            .padding(horizontal = 16.dp, vertical = 9.dp)
+                    ) {
+                        Text("Connect calendar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Cream)
+                    }
+                } else {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Show calendar in Plan", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Events appear read-only and block Auto-plan slots",
+                                fontSize = 11.5.sp, color = Faint,
+                            )
+                        }
+                        Switch(
+                            checked = calendarEnabled,
+                            onCheckedChange = {
+                                vm.setCalendarEnabled(it)
+                                vm.refreshCalendar()
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = Ink, checkedThumbColor = Cream),
+                        )
+                    }
                 }
             }
         }
@@ -251,7 +456,7 @@ fun SettingsScreen(vm: MainViewModel) {
 private fun ProviderButton(modifier: Modifier, label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier
-            .background(if (selected) Card else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(9.dp))
+            .background(if (selected) Card else Color.Transparent, RoundedCornerShape(9.dp))
             .tapNoRipple(onClick)
             .padding(vertical = 8.dp),
         contentAlignment = Alignment.Center,
@@ -259,36 +464,6 @@ private fun ProviderButton(modifier: Modifier, label: String, selected: Boolean,
         Text(
             label, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
             color = if (selected) Ink else Faint,
-        )
-    }
-}
-
-@Composable
-private fun ModelRow(name: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .tapNoRipple(onClick)
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier
-                .size(16.dp)
-                .then(
-                    if (selected) Modifier.background(Ink, RoundedCornerShape(50))
-                    else Modifier.border(1.5.dp, Border, RoundedCornerShape(50))
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (selected) Text("✓", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Cream)
-        }
-        Text(
-            name,
-            fontSize = 12.5.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) Ink else Muted,
-            modifier = Modifier.padding(start = 10.dp),
         )
     }
 }

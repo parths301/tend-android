@@ -62,9 +62,11 @@ fun DetailScreen(vm: MainViewModel) {
     val habits by vm.habits.collectAsStateWithLifecycle()
     val shell by vm.shell.collectAsStateWithLifecycle()
     val notes by vm.notes.collectAsStateWithLifecycle()
+    val customs by vm.customCategories.collectAsStateWithLifecycle()
     val h = habits.firstOrNull { it.habit.id == shell.detailHabitId } ?: return
     val color = Color(h.habit.colorHex)
     val soft = color.copy(alpha = 0.14f)
+    var showEdit by remember { mutableStateOf(false) }
 
     Column(
         Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp),
@@ -97,13 +99,50 @@ fun DetailScreen(vm: MainViewModel) {
                 )
                 Row {
                     Text("◆ ${h.streak}-day streak", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = color)
-                    Text(" · ${h.habit.goal}", fontSize = 12.sp, color = Muted)
+                    val extra = h.habit.reminderMin?.let { " · ⏰ ${Time.clockAmPm(it)}" } ?: " · ${h.habit.goal}"
+                    Text(extra, fontSize = 12.sp, color = Muted)
                 }
+            }
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .border(1.dp, Border, RoundedCornerShape(11.dp))
+                    .tapNoRipple { showEdit = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("✎", fontSize = 14.sp, color = Muted)
             }
             HabitCheckButton(h, color, size = 44.dp, corner = 14.dp) { vm.toggleHabit(h.habit.id) }
         }
 
-        CalendarCard(h.doneDays, h.doneToday, color, vm.today)
+        if (showEdit) {
+            HabitDialog(
+                title = "Edit habit",
+                customs = customs,
+                onAddCustom = vm::addCustomCategory,
+                initialName = h.habit.name,
+                initialCategory = h.habit.category,
+                initialType = h.habit.type,
+                initialGoal = h.habit.goal,
+                initialReminderMin = h.habit.reminderMin,
+                saveLabel = "Save",
+                onSave = { name, category, type, goal, reminderMin ->
+                    vm.updateHabit(
+                        h.habit.copy(
+                            name = name.trim(),
+                            category = category,
+                            type = type,
+                            goal = goal.trim().ifEmpty { "Daily" },
+                            reminderMin = reminderMin,
+                        )
+                    )
+                    showEdit = false
+                },
+                onDismiss = { showEdit = false },
+            )
+        }
+
+        CalendarCard(h.doneDays, h.doneToday, color, vm.today, h.habit.createdDay)
 
         // Streak stats
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -211,7 +250,7 @@ private fun MiniStat(modifier: Modifier, big: String, label: String) {
 }
 
 @Composable
-private fun CalendarCard(doneDays: Set<Long>, doneToday: Boolean, color: Color, today: Long) {
+private fun CalendarCard(doneDays: Set<Long>, doneToday: Boolean, color: Color, today: Long, createdDay: Long) {
     var monthOffset by remember { mutableIntStateOf(0) }
     val todayDate = LocalDate.ofEpochDay(today)
     val month = todayDate.plusMonths(monthOffset.toLong()).withDayOfMonth(1)
@@ -258,7 +297,9 @@ private fun CalendarCard(doneDays: Set<Long>, doneToday: Boolean, color: Color, 
                     Modifier.fillMaxWidth().padding(bottom = 5.dp),
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    week.forEach { epoch -> CalendarCell(Modifier.weight(1f), epoch, doneDays, doneToday, color, today) }
+                    week.forEach { epoch ->
+                        CalendarCell(Modifier.weight(1f), epoch, doneDays, doneToday, color, today, createdDay)
+                    }
                     repeat(7 - week.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
@@ -274,13 +315,15 @@ private fun CalendarCell(
     doneToday: Boolean,
     color: Color,
     today: Long,
+    createdDay: Long,
 ) {
     if (epoch == null) {
         Spacer(modifier.aspectRatio(1f))
         return
     }
     val dayOfMonth = LocalDate.ofEpochDay(epoch).dayOfMonth
-    val isFuture = epoch > today
+    // Days before the habit existed render like future days — they don't count.
+    val outside = epoch > today || epoch < createdDay
     val isToday = epoch == today
     val on = if (isToday) doneToday else epoch in doneDays
     Box(
@@ -288,7 +331,7 @@ private fun CalendarCell(
             .aspectRatio(1f)
             .then(
                 when {
-                    isFuture -> Modifier.border(1.dp, SegBg, RoundedCornerShape(10.dp))
+                    outside -> Modifier.border(1.dp, SegBg, RoundedCornerShape(10.dp))
                     on -> Modifier.background(color, RoundedCornerShape(10.dp))
                     else -> Modifier.background(Track, RoundedCornerShape(10.dp))
                 }
@@ -301,7 +344,7 @@ private fun CalendarCell(
         Text(
             "$dayOfMonth", fontFamily = SpaceGrotesk, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
             color = when {
-                isFuture -> Disabled
+                outside -> Disabled
                 on -> Card
                 else -> Muted
             },

@@ -1,6 +1,5 @@
 package com.tend.app.ui.screens
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -13,10 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,11 +22,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.TextStyle as ComposeTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,17 +33,22 @@ import com.tend.app.HabitView
 import com.tend.app.MainViewModel
 import com.tend.app.Tab
 import com.tend.app.domain.Time
+import com.tend.app.ui.components.CategoryPicker
 import com.tend.app.ui.components.CheckCircle
+import com.tend.app.ui.components.DashedAddBox
+import com.tend.app.ui.components.DialogInput
+import com.tend.app.ui.components.DialogLabel
 import com.tend.app.ui.components.HeatCell
 import com.tend.app.ui.components.Heatmap
 import com.tend.app.ui.components.Kicker
 import com.tend.app.ui.components.ProgressRing
 import com.tend.app.ui.components.ScreenTitle
 import com.tend.app.ui.components.TendCard
+import com.tend.app.ui.components.TimeStepperRow
 import com.tend.app.ui.components.tapNoRipple
 import com.tend.app.ui.theme.Border
 import com.tend.app.ui.theme.Card
-import com.tend.app.ui.theme.Dashed as DashedColor
+import com.tend.app.ui.theme.Cream
 import com.tend.app.ui.theme.Disabled
 import com.tend.app.ui.theme.EmptyWeekCell
 import com.tend.app.ui.theme.Faint
@@ -61,7 +59,6 @@ import com.tend.app.ui.theme.SegBg
 import com.tend.app.ui.theme.SpaceGrotesk
 import com.tend.app.ui.theme.Terracotta
 import com.tend.app.ui.theme.Track
-import java.time.DayOfWeek
 import java.time.format.TextStyle
 import java.util.Locale
 
@@ -71,6 +68,7 @@ fun TodayScreen(vm: MainViewModel) {
     val tasks by vm.tasks.collectAsStateWithLifecycle()
     val shell by vm.shell.collectAsStateWithLifecycle()
     val weeks by vm.heatmapWeeks.collectAsStateWithLifecycle()
+    val customs by vm.customCategories.collectAsStateWithLifecycle()
 
     val doneCount = habits.count { it.doneToday }
     val tasksLeft = tasks.count { !it.done }
@@ -97,6 +95,7 @@ fun TodayScreen(vm: MainViewModel) {
         WeekStrip(habits, vm.today)
 
         // Category chips + Grid/Week toggle
+        val categories = listOf("All") + habits.map { it.habit.category }.distinct().sorted()
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
                 Modifier
@@ -104,7 +103,7 @@ fun TodayScreen(vm: MainViewModel) {
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf("All", "Fitness", "Mind", "Work", "Health").forEach { cat ->
+                categories.forEach { cat ->
                     val selected = shell.filter == cat
                     Box(
                         Modifier
@@ -115,7 +114,7 @@ fun TodayScreen(vm: MainViewModel) {
                     ) {
                         Text(
                             cat, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                            color = if (selected) com.tend.app.ui.theme.Cream else Muted,
+                            color = if (selected) Cream else Muted,
                         )
                     }
                 }
@@ -154,9 +153,12 @@ fun TodayScreen(vm: MainViewModel) {
         var showNewHabit by rememberSaveable { mutableStateOf(false) }
         DashedAddBox("Add a habit") { showNewHabit = true }
         if (showNewHabit) {
-            NewHabitDialog(
-                onCreate = { name, category, type, goal ->
-                    vm.addHabit(name, category, type, goal)
+            HabitDialog(
+                title = "New habit",
+                customs = customs,
+                onAddCustom = vm::addCustomCategory,
+                onSave = { name, category, type, goal, reminderMin ->
+                    vm.addHabit(name, category, type, goal, reminderMin)
                     showNewHabit = false
                 },
                 onDismiss = { showNewHabit = false },
@@ -166,65 +168,60 @@ fun TodayScreen(vm: MainViewModel) {
 }
 
 @Composable
-fun DashedAddBox(label: String, onClick: () -> Unit) {
-    Box(Modifier.fillMaxWidth().tapNoRipple(onClick)) {
-        Canvas(Modifier.matchParentSize()) {
-            drawRoundRect(
-                color = DashedColor,
-                cornerRadius = CornerRadius(16.dp.toPx()),
-                style = Stroke(
-                    width = 1.5.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f)),
-                ),
-            )
-        }
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("+", fontSize = 17.sp, color = Muted)
-            Text(label, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Muted)
-        }
+private fun SettingsButton(onClick: () -> Unit) {
+    Box(
+        Modifier
+            .padding(top = 6.dp)
+            .size(38.dp)
+            .background(Card, RoundedCornerShape(12.dp))
+            .border(1.dp, Border, RoundedCornerShape(12.dp))
+            .tapNoRipple(onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("⚙︎", fontSize = 17.sp, color = Ink)
     }
 }
 
+/**
+ * Create/edit habit form. When [initial] fields are supplied it acts as an
+ * editor; reminder time drives notifications and the plan's habit blocks.
+ */
 @Composable
-private fun NewHabitDialog(
-    onCreate: (name: String, category: String, type: String, goal: String) -> Unit,
+fun HabitDialog(
+    title: String,
+    customs: List<String>,
+    onAddCustom: (String) -> Unit,
+    onSave: (name: String, category: String, type: String, goal: String, reminderMin: Int?) -> Unit,
     onDismiss: () -> Unit,
+    initialName: String = "",
+    initialCategory: String = "Fitness",
+    initialType: String = "check",
+    initialGoal: String = "",
+    initialReminderMin: Int? = null,
+    saveLabel: String = "Create",
 ) {
-    var name by rememberSaveable { mutableStateOf("") }
-    var category by rememberSaveable { mutableStateOf("Fitness") }
-    var type by rememberSaveable { mutableStateOf("check") }
-    var goal by rememberSaveable { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf(initialName) }
+    var category by rememberSaveable { mutableStateOf(initialCategory) }
+    var type by rememberSaveable { mutableStateOf(initialType) }
+    var goal by rememberSaveable { mutableStateOf(initialGoal) }
+    var reminderOn by rememberSaveable { mutableStateOf(initialReminderMin != null) }
+    var reminderMin by rememberSaveable { mutableStateOf(initialReminderMin ?: 8 * 60) }
 
     Dialog(onDismissRequest = onDismiss) {
         TendCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("New habit", fontFamily = SpaceGrotesk, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(title, fontFamily = SpaceGrotesk, fontSize = 17.sp, fontWeight = FontWeight.Bold)
 
                 DialogLabel("Name")
                 DialogInput(name, { name = it }, "e.g. Morning stretch")
 
                 DialogLabel("Category")
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("Fitness", "Mind", "Work", "Health").forEach { cat ->
-                        val selected = category == cat
-                        Box(
-                            Modifier
-                                .background(if (selected) Ink else Color.Transparent, RoundedCornerShape(99.dp))
-                                .border(1.dp, if (selected) Ink else Border, RoundedCornerShape(99.dp))
-                                .tapNoRipple { category = cat }
-                                .padding(horizontal = 11.dp, vertical = 7.dp)
-                        ) {
-                            Text(
-                                cat, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold,
-                                color = if (selected) com.tend.app.ui.theme.Cream else Muted,
-                            )
-                        }
-                    }
-                }
+                CategoryPicker(
+                    selected = category,
+                    customs = customs,
+                    onSelect = { category = it },
+                    onAddCustom = onAddCustom,
+                )
 
                 DialogLabel("Type")
                 Row(Modifier.background(SegBg, RoundedCornerShape(10.dp)).padding(3.dp)) {
@@ -235,15 +232,45 @@ private fun NewHabitDialog(
                 DialogLabel("Goal (optional)")
                 DialogInput(goal, { goal = it }, if (type == "time") "e.g. 2h · weekdays" else "e.g. Daily · 8:00 AM")
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val canCreate = name.trim().isNotEmpty()
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    DialogLabel("Reminder & plan slot")
                     Box(
                         Modifier
-                            .background(if (canCreate) Ink else Disabled, RoundedCornerShape(99.dp))
-                            .tapNoRipple { if (canCreate) onCreate(name, category, type, goal) }
+                            .background(if (reminderOn) Ink else Color.Transparent, RoundedCornerShape(99.dp))
+                            .border(1.dp, if (reminderOn) Ink else Border, RoundedCornerShape(99.dp))
+                            .tapNoRipple { reminderOn = !reminderOn }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            if (reminderOn) "On" else "Off",
+                            fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
+                            color = if (reminderOn) Cream else Faint,
+                        )
+                    }
+                }
+                if (reminderOn) {
+                    TimeStepperRow(reminderMin, { reminderMin = it })
+                    Text(
+                        "You'll get a nudge at this time, and the habit lands on today's plan automatically.",
+                        fontSize = 11.sp, color = Faint, lineHeight = 15.sp,
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val canSave = name.trim().isNotEmpty()
+                    Box(
+                        Modifier
+                            .background(if (canSave) Ink else Disabled, RoundedCornerShape(99.dp))
+                            .tapNoRipple {
+                                if (canSave) onSave(name, category, type, goal, if (reminderOn) reminderMin else null)
+                            }
                             .padding(horizontal = 18.dp, vertical = 10.dp)
                     ) {
-                        Text("Create", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = com.tend.app.ui.theme.Cream)
+                        Text(saveLabel, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Cream)
                     }
                     Box(
                         Modifier
@@ -256,30 +283,6 @@ private fun NewHabitDialog(
                 }
             }
         }
-    }
-}
-
-@Composable
-fun DialogLabel(text: String) {
-    Text(text, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp, color = Faint)
-}
-
-@Composable
-fun DialogInput(value: String, onChange: (String) -> Unit, placeholder: String) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .background(Card, RoundedCornerShape(12.dp))
-            .border(1.dp, Border, RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-    ) {
-        BasicTextField(
-            value = value,
-            onValueChange = onChange,
-            textStyle = ComposeTextStyle(fontSize = 13.sp, color = Ink),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (value.isEmpty()) Text(placeholder, fontSize = 13.sp, color = Faint)
     }
 }
 
@@ -300,24 +303,8 @@ private fun SegChoice(modifier: Modifier, label: String, selected: Boolean, onCl
 }
 
 @Composable
-private fun SettingsButton(onClick: () -> Unit) {
-    Box(
-        Modifier
-            .padding(top = 6.dp)
-            .size(38.dp)
-            .background(Card, RoundedCornerShape(12.dp))
-            .border(1.dp, Border, RoundedCornerShape(12.dp))
-            .tapNoRipple(onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("⚙︎", fontSize = 17.sp, color = Ink)
-    }
-}
-
-@Composable
 private fun WeekStrip(habits: List<HabitUi>, today: Long) {
     val monday = today - (java.time.LocalDate.ofEpochDay(today).dayOfWeek.value - 1)
-    val total = habits.size.coerceAtLeast(1)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         (0..6).forEach { offset ->
             val day = monday + offset
@@ -325,21 +312,24 @@ private fun WeekStrip(habits: List<HabitUi>, today: Long) {
             val label = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH).uppercase()
             val isToday = day == today
             val isFuture = day > today
-            val count = habits.count { day in it.doneDays }
+            // Only habits that existed on this day count toward it.
+            val alive = habits.count { it.habit.createdDay <= day }
+            val count = habits.count { it.habit.createdDay <= day && day in it.doneDays }
+            val blank = isFuture || alive == 0
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     label, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp,
                     color = if (isToday) Ink else Faint,
                 )
                 ProgressRing(
-                    progress = if (isFuture) 0f else count.toFloat() / total,
+                    progress = if (blank) 0f else count.toFloat() / alive,
                     ringColor = when {
-                        isFuture -> Color.Transparent
+                        blank -> Color.Transparent
                         isToday -> Terracotta
                         else -> RingPast
                     },
-                    label = if (isFuture) "·" else "$count/$total",
-                    labelColor = if (isFuture) Disabled else Ink,
+                    label = if (blank) "·" else "$count/$alive",
+                    labelColor = if (blank) Disabled else Ink,
                 )
             }
         }
@@ -398,7 +388,9 @@ private fun HabitCard(
                             "◆ ${h.streak}-day streak", fontSize = 12.sp,
                             fontWeight = FontWeight.Bold, color = color,
                         )
-                        Text(" · ${h.habit.goal}", fontSize = 12.sp, color = Muted)
+                        val extra = h.habit.reminderMin?.let { " · ⏰ ${Time.clockAmPm(it)}" }
+                            ?: " · ${h.habit.goal}"
+                        Text(extra, fontSize = 12.sp, color = Muted)
                     }
                 }
                 HabitCheckButton(h, color, size = 46.dp, corner = 15.dp, onToggle = onToggle)
@@ -407,8 +399,16 @@ private fun HabitCard(
             if (gridView) {
                 val cells = (0 until weeks * 7).map { i ->
                     val day = today - (weeks * 7 - 1) + i
+                    val before = day < h.habit.createdDay
                     val on = if (day == today) h.doneToday else day in h.doneDays
-                    HeatCell(color = if (on) color else Track, outlined = day == today)
+                    HeatCell(
+                        color = when {
+                            before -> EmptyWeekCell
+                            on -> color
+                            else -> Track
+                        },
+                        outlined = day == today,
+                    )
                 }
                 Heatmap(cells, Modifier.fillMaxWidth())
             } else {
@@ -454,6 +454,7 @@ private fun WeekRow(h: HabitUi, color: Color, today: Long) {
             val day = monday + i
             val isFuture = day > today
             val isToday = day == today
+            val before = day < h.habit.createdDay
             val on = if (isToday) h.doneToday else day in h.doneDays
             Column(
                 Modifier.weight(1f),
@@ -467,7 +468,7 @@ private fun WeekRow(h: HabitUi, color: Color, today: Long) {
                         .height(38.dp)
                         .background(
                             when {
-                                isFuture -> EmptyWeekCell
+                                isFuture || before -> EmptyWeekCell
                                 on -> color
                                 else -> Track
                             },
@@ -476,13 +477,13 @@ private fun WeekRow(h: HabitUi, color: Color, today: Long) {
                         .then(
                             when {
                                 isToday -> Modifier.border(1.5.dp, Ink, RoundedCornerShape(11.dp))
-                                isFuture -> Modifier.border(1.dp, SegBg, RoundedCornerShape(11.dp))
+                                isFuture || before -> Modifier.border(1.dp, SegBg, RoundedCornerShape(11.dp))
                                 else -> Modifier
                             }
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (!isFuture) {
+                    if (!isFuture && !before) {
                         Text(
                             if (on) "✓" else "·",
                             fontSize = 14.sp, fontWeight = FontWeight.Bold,

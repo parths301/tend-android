@@ -39,6 +39,19 @@ class StreaksTest {
     }
 
     @Test
+    fun `rate window is clipped to the habit's creation day`() {
+        // Habit created 5 days ago, done every day since: 5/5 = 100%, not 5/30.
+        val done = ((today - 4)..today).toSet()
+        assertEquals(100, Streaks.rate(done, today, window = 30, sinceDay = today - 4))
+    }
+
+    @Test
+    fun `rate handles a habit created today`() {
+        assertEquals(100, Streaks.rate(setOf(today), today, window = 30, sinceDay = today))
+        assertEquals(0, Streaks.rate(emptySet(), today, window = 30, sinceDay = today))
+    }
+
+    @Test
     fun `time formatting matches the design`() {
         assertEquals("7:30", Time.clock(450))
         assertEquals("7:45 AM", Time.clockAmPm(465))

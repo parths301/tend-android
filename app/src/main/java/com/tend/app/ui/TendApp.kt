@@ -1,5 +1,6 @@
 package com.tend.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -21,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
@@ -30,6 +32,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tend.app.MainViewModel
@@ -53,6 +58,21 @@ import kotlin.math.abs
 fun TendApp(vm: MainViewModel = viewModel()) {
     val shell by vm.shell.collectAsStateWithLifecycle()
     val showAiBar by vm.showAiBar.collectAsStateWithLifecycle()
+
+    // Back closes overlays / detail screens before exiting the app.
+    BackHandler(enabled = shell.aiOpen || shell.tab == Tab.Detail || shell.tab == Tab.Settings) {
+        if (shell.aiOpen) vm.closeAi() else vm.selectTab(Tab.Today)
+    }
+
+    // Notification deep links (e.g. nightly check-in → tomorrow's plan).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) vm.consumeDeepLink()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Box(
         Modifier

@@ -24,9 +24,16 @@ object Streaks {
         return best
     }
 
-    /** Completion percentage over the trailing [window] days (inclusive of today). */
-    fun rate(doneDays: Set<Long>, today: Long, window: Int = 30): Int {
-        val done = ((today - window + 1)..today).count { it in doneDays }
-        return (done * 100) / window
+    /**
+     * Completion percentage over the trailing [window] days (inclusive of today).
+     * [sinceDay] clips the window to the habit's creation day so young habits
+     * aren't penalised for days on which they didn't exist yet.
+     */
+    fun rate(doneDays: Set<Long>, today: Long, window: Int = 30, sinceDay: Long = Long.MIN_VALUE): Int {
+        val first = maxOf(today - window + 1, sinceDay)
+        if (first > today) return 0
+        val span = (today - first + 1).toInt().coerceAtLeast(1)
+        val done = (first..today).count { it in doneDays }
+        return (done * 100) / span
     }
 }

@@ -19,7 +19,7 @@ interface HabitDao {
     @Query("SELECT * FROM habit_logs WHERE habitId = :habitId AND epochDay = :epochDay LIMIT 1")
     suspend fun logFor(habitId: Long, epochDay: Long): HabitLog?
 
-    // One-shot reads for home-screen widgets (no Flow collection outside the app UI)
+    // One-shot reads for widgets and the reminder scheduler
     @Query("SELECT * FROM habits ORDER BY sortOrder")
     suspend fun habitsOnce(): List<Habit>
 
@@ -37,6 +37,9 @@ interface HabitDao {
 
     @Insert
     suspend fun insertHabit(habit: Habit): Long
+
+    @Update
+    suspend fun updateHabit(habit: Habit)
 
     @Query("SELECT * FROM habits WHERE id = :id LIMIT 1")
     suspend fun habitById(id: Long): Habit?
@@ -59,6 +62,9 @@ interface TaskDao {
     @Query("SELECT * FROM tasks ORDER BY sortOrder, id")
     fun tasks(): Flow<List<TaskItem>>
 
+    @Query("SELECT * FROM tasks")
+    suspend fun tasksOnce(): List<TaskItem>
+
     @Update
     suspend fun update(task: TaskItem)
 
@@ -80,6 +86,9 @@ interface PlanDao {
     @Query("SELECT * FROM plan_blocks WHERE epochDay = :epochDay ORDER BY startMin")
     fun forDay(epochDay: Long): Flow<List<PlanBlock>>
 
+    @Query("SELECT * FROM plan_blocks WHERE epochDay = :epochDay ORDER BY startMin")
+    suspend fun forDayOnce(epochDay: Long): List<PlanBlock>
+
     @Update
     suspend fun update(block: PlanBlock)
 
@@ -94,6 +103,9 @@ interface PlanDao {
 
     @Delete
     suspend fun delete(block: PlanBlock)
+
+    @Query("DELETE FROM plan_blocks WHERE epochDay = :epochDay AND source = 'auto'")
+    suspend fun deleteAutoFor(epochDay: Long)
 
     @Query("DELETE FROM plan_blocks")
     suspend fun clearPlans()

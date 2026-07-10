@@ -14,6 +14,8 @@ data class Habit(
     val type: String,            // "check" | "time" | "avoid"
     val goal: String,            // e.g. "Daily · 8:00 AM"
     val sortOrder: Int = 0,
+    val createdDay: Long = 0,    // epoch day the habit was created; stats start here
+    val reminderMin: Int? = null, // minutes since midnight; null = no reminder
 )
 
 @Entity(
@@ -35,6 +37,8 @@ data class TaskItem(
     val groupName: String,       // "PERSONAL" | "WORK" | "HEALTH" | ...
     val done: Boolean = false,
     val sortOrder: Int = 0,
+    val dueDay: Long? = null,    // epoch day the task is due; null = no due date
+    val dueMin: Int? = null,     // minutes since midnight; null = no due time
 )
 
 @Entity(tableName = "plan_blocks")
@@ -46,6 +50,7 @@ data class PlanBlock(
     val title: String,
     val kind: String,            // "habit" | "focus" | "event"
     val done: Boolean = false,
+    val source: String = "manual", // "manual" | "habit" | "auto"
 )
 
 @Entity(tableName = "notes")

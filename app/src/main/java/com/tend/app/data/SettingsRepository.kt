@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -23,12 +24,23 @@ class SettingsRepository(context: Context) {
     private val heatmapWeeksKey = intPreferencesKey("heatmap_weeks")
     private val showAiBarKey = booleanPreferencesKey("show_ai_bar")
     private val providerKey = stringPreferencesKey("ai_provider")
+    private val customCategoriesKey = stringSetPreferencesKey("custom_categories")
+    private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
+    private val checkinEnabledKey = booleanPreferencesKey("checkin_enabled")
+    private val checkinMinKey = intPreferencesKey("checkin_min")
+    private val calendarEnabledKey = booleanPreferencesKey("calendar_enabled")
 
     private fun modelKey(provider: String) = stringPreferencesKey("model_$provider")
 
     val heatmapWeeks: Flow<Int> = store.data.map { it[heatmapWeeksKey] ?: 17 }
     val showAiBar: Flow<Boolean> = store.data.map { it[showAiBarKey] ?: true }
     val provider: Flow<String> = store.data.map { it[providerKey] ?: PROVIDER_GEMINI }
+    val customCategories: Flow<List<String>> =
+        store.data.map { (it[customCategoriesKey] ?: emptySet()).sorted() }
+    val notificationsEnabled: Flow<Boolean> = store.data.map { it[notificationsEnabledKey] ?: true }
+    val checkinEnabled: Flow<Boolean> = store.data.map { it[checkinEnabledKey] ?: true }
+    val checkinMin: Flow<Int> = store.data.map { it[checkinMinKey] ?: DEFAULT_CHECKIN_MIN }
+    val calendarEnabled: Flow<Boolean> = store.data.map { it[calendarEnabledKey] ?: false }
 
     /** Selected model for the currently selected provider. */
     val model: Flow<String> = store.data.map { prefs ->
@@ -53,6 +65,28 @@ class SettingsRepository(context: Context) {
             val p = prefs[providerKey] ?: PROVIDER_GEMINI
             prefs[modelKey(p)] = model.trim().ifEmpty { defaultModel(p) }
         }
+    }
+
+    suspend fun addCustomCategory(name: String) {
+        val trimmed = name.trim().replaceFirstChar { it.uppercaseChar() }
+        if (trimmed.isEmpty() || trimmed in PRESET_CATEGORIES) return
+        store.edit { it[customCategoriesKey] = (it[customCategoriesKey] ?: emptySet()) + trimmed }
+    }
+
+    suspend fun setNotificationsEnabled(enabled: Boolean) {
+        store.edit { it[notificationsEnabledKey] = enabled }
+    }
+
+    suspend fun setCheckinEnabled(enabled: Boolean) {
+        store.edit { it[checkinEnabledKey] = enabled }
+    }
+
+    suspend fun setCheckinMin(min: Int) {
+        store.edit { it[checkinMinKey] = min.coerceIn(0, 24 * 60 - 1) }
+    }
+
+    suspend fun setCalendarEnabled(enabled: Boolean) {
+        store.edit { it[calendarEnabledKey] = enabled }
     }
 
     // BYOK API keys live in EncryptedSharedPreferences, never in plain storage.
@@ -81,6 +115,8 @@ class SettingsRepository(context: Context) {
     companion object {
         const val PROVIDER_ANTHROPIC = "anthropic"
         const val PROVIDER_GEMINI = "gemini"
+        const val DEFAULT_CHECKIN_MIN = 21 * 60 + 30 // 9:30 PM nightly check-in
+        val PRESET_CATEGORIES = listOf("Fitness", "Mind", "Work", "Health")
 
         fun defaultModel(provider: String): String = when (provider) {
             PROVIDER_GEMINI -> "gemini-2.5-flash"
