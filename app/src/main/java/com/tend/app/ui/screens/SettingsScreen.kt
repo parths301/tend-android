@@ -34,8 +34,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -51,6 +53,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tend.app.MainViewModel
 import com.tend.app.Tab
@@ -94,17 +99,37 @@ fun SettingsScreen(vm: MainViewModel) {
         }
     }
 
-    val notifPermissionLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    var calendarGranted by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) ==
-                PackageManager.PERMISSION_GRANTED
-        )
+    // Re-check OS permission grants every time the screen resumes — e.g. after the
+    // user returns from the system "Alarms & reminders" or app-settings pages.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var permissionTick by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) permissionTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+
+    val notifGranted = remember(permissionTick) {
+        Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+    val exactAllowed = remember(permissionTick) {
+        Build.VERSION.SDK_INT < 31 ||
+            context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+    }
+    val calendarGranted = remember(permissionTick) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    val notifPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionTick++ }
     val calendarPermissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            calendarGranted = granted
+            permissionTick++
             if (granted) {
                 vm.setCalendarEnabled(true)
                 vm.refreshCalendar()
@@ -301,38 +326,44 @@ fun SettingsScreen(vm: MainViewModel) {
                 }
 
                 if (notificationsEnabled) {
-                    val alarmManager = context.getSystemService(AlarmManager::class.java)
-                    val exactAllowed = Build.VERSION.SDK_INT < 31 || alarmManager.canScheduleExactAlarms()
-                    if (!exactAllowed) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "Exact timing is off — reminders may arrive a few minutes late.",
-                                fontSize = 11.5.sp, color = Terracotta, lineHeight = 16.sp,
-                                modifier = Modifier.weight(1f).padding(end = 10.dp),
-                            )
-                            Box(
-                                Modifier
-                                    .border(1.dp, Border, RoundedCornerShape(99.dp))
-                                    .tapNoRipple {
-                                        if (Build.VERSION.SDK_INT >= 31) {
-                                            context.startActivity(
-                                                Intent(
-                                                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-                                                    Uri.parse("package:${context.packageName}"),
-                                                )
-                                            )
-                                        }
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp)
-                            ) {
-                                Text("Allow", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Ink)
-                            }
-                        }
+                    HorizontalDivider(color = RowDivider, thickness = 1.dp)
+                    FieldLabel("Permissions")
+
+                    // Notification permission (Android 13+)
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        PermissionRow(
+                            title = "Show notifications",
+                            granted = notifGranted,
+                            grantedNote = "Reminders can appear.",
+                            deniedNote = "Blocked — reminders won't show.",
+                            onAllow = {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                )
+                            },
+                        )
                     }
+
+                    // Exact-alarm permission (Android 12+)
+                    if (Build.VERSION.SDK_INT >= 31) {
+                        PermissionRow(
+                            title = "Exact alarms",
+                            granted = exactAllowed,
+                            grantedNote = "Reminders fire on the minute.",
+                            deniedNote = "Off — reminders may arrive a few minutes late.",
+                            onAllow = {
+                                context.startActivity(
+                                    Intent(
+                                        Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                        Uri.parse("package:${context.packageName}"),
+                                    )
+                                )
+                            },
+                        )
+                    }
+
+                    HorizontalDivider(color = RowDivider, thickness = 1.dp)
 
                     Row(
                         Modifier.fillMaxWidth(),
@@ -380,6 +411,7 @@ fun SettingsScreen(vm: MainViewModel) {
                         Text("Connect calendar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Cream)
                     }
                 } else {
+                    Text("✓ Calendar access allowed", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Teal)
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -494,6 +526,44 @@ private fun SectionLabel(text: String) {
 @Composable
 private fun FieldLabel(text: String) {
     Text(text, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Muted)
+}
+
+/** One OS-permission row: title + live status, and an "Allow" pill when not yet granted. */
+@Composable
+private fun PermissionRow(
+    title: String,
+    granted: Boolean,
+    grantedNote: String,
+    deniedNote: String,
+    onAllow: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 10.dp)) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (granted) grantedNote else deniedNote,
+                fontSize = 11.5.sp,
+                color = if (granted) Teal else Terracotta,
+                lineHeight = 16.sp,
+            )
+        }
+        if (granted) {
+            Text("✓ Allowed", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Teal)
+        } else {
+            Box(
+                Modifier
+                    .border(1.dp, Border, RoundedCornerShape(99.dp))
+                    .tapNoRipple(onAllow)
+                    .padding(horizontal = 14.dp, vertical = 7.dp)
+            ) {
+                Text("Allow", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Ink)
+            }
+        }
+    }
 }
 
 @Composable
