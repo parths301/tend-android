@@ -181,6 +181,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             TendWidgets.refresh(getApplication())
             ReminderScheduler.reschedule(getApplication())
         }
+        viewModelScope.launch {
+            // Once a key is present, load the model list so a saved model that has
+            // since been retired or is quota-locked (e.g. a "-preview") heals to a
+            // working default without the user having to open Settings.
+            apiKey.first { it.isNotBlank() }
+            refreshModels()
+        }
     }
 
     // ── navigation ──────────────────────────────────────────────
@@ -474,7 +481,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         withContext(Dispatchers.IO) {
             try {
                 val history = chatState.value.map { it.fromAi to it.text }
-                val raw = ai.complete(aiProvider, key, model.value, AiProtocol.systemPrompt(stateSummary()), history)
+                // If the model list is loaded and the saved model isn't in it (retired
+                // or filtered out as unstable), fall back to a working one for this call
+                // and persist the correction.
+                val loaded = modelsState.value.models
+                val effectiveModel = when {
+                    loaded.isEmpty() || model.value in loaded -> model.value
+                    else -> (loaded.firstOrNull { it == SettingsRepository.defaultModel(aiProvider) }
+                        ?: loaded.first()).also { settings.setModel(it) }
+                }
+                val raw = ai.complete(aiProvider, key, effectiveModel, AiProtocol.systemPrompt(stateSummary()), history)
                 AiProtocol.parse(raw) ?: com.tend.app.ai.AiResult(raw.take(500), emptyList())
             } catch (e: Exception) {
                 val label = SettingsRepository.providerLabel(aiProvider)

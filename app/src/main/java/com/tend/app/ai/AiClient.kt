@@ -85,7 +85,8 @@ class AiClient {
     private fun geminiModels(apiKey: String): List<String> {
         val raw = http("GET", "$GEMINI_BASE/models?pageSize=200", mapOf("x-goog-api-key" to apiKey))
         val models = JSONObject(raw).optJSONArray("models") ?: return emptyList()
-        val names = mutableListOf<String>()
+        val stable = mutableListOf<String>()
+        val all = mutableListOf<String>()
         for (i in 0 until models.length()) {
             val m = models.getJSONObject(i)
             val name = m.optString("name").removePrefix("models/")
@@ -94,11 +95,17 @@ class AiClient {
             if (methods != null) {
                 for (j in 0 until methods.length()) if (methods.optString(j) == "generateContent") chat = true
             }
-            if (chat && name.startsWith("gemini-") && !NON_TEXT.containsMatchIn(name)) names.add(name)
+            if (chat && name.startsWith("gemini-") && !NON_TEXT.containsMatchIn(name)) {
+                all.add(name)
+                // Preview/experimental variants get retired without notice and often
+                // ship with near-zero free-tier quota (429s), so keep them out of the
+                // picker unless a key has nothing else.
+                if (!UNSTABLE.containsMatchIn(name)) stable.add(name)
+            }
         }
         // Newest families first; the plain "flash" of the newest generation is the
         // sensible default, so surface it at the top.
-        return names.sortedWith(
+        return (stable.ifEmpty { all }).sortedWith(
             compareByDescending<String> { it }.thenBy { it.length }
         ).sortedByDescending { generationOf(it) * 10 + if (it.endsWith("flash")) 1 else 0 }
     }
@@ -163,6 +170,22 @@ class AiClient {
         headers: Map<String, String>,
         body: String? = null,
     ): String {
+        // Retry once on a transient connection drop (common on mobile networks:
+        // "Software caused connection abort", "Connection reset"). HTTP error
+        // responses are not retried — they're surfaced to the user as-is.
+        return try {
+            httpOnce(method, url, headers, body)
+        } catch (e: java.io.IOException) {
+            httpOnce(method, url, headers, body)
+        }
+    }
+
+    private fun httpOnce(
+        method: String,
+        url: String,
+        headers: Map<String, String>,
+        body: String? = null,
+    ): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = method
         conn.connectTimeout = 20_000
@@ -196,5 +219,8 @@ class AiClient {
 
         /** Non-text model ids to hide from the picker (chat protocol is text-only). */
         val NON_TEXT = Regex("embed|image|imagen|audio|tts|live|veo|aqa|vision|robotics|computer-use")
+
+        /** Preview/experimental/special variants — unreliable, hidden from the picker. */
+        val UNSTABLE = Regex("preview|exp|thinking|tuning|customtools")
     }
 }
