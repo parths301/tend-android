@@ -9,15 +9,20 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.DropdownMenu
@@ -222,13 +227,22 @@ fun SettingsScreen(vm: MainViewModel) {
                                 DropdownMenu(
                                     expanded = menuOpen,
                                     onDismissRequest = { menuOpen = false },
+                                    modifier = Modifier.heightIn(max = 300.dp).width(260.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    containerColor = Cream,
+                                    tonalElevation = 0.dp,
+                                    shadowElevation = 8.dp,
+                                    border = BorderStroke(1.dp, Border),
                                 ) {
                                     modelsUi.models.forEach { m ->
                                         DropdownMenuItem(
+                                            modifier = Modifier.height(42.dp),
+                                            contentPadding = PaddingValues(horizontal = 14.dp),
                                             text = {
                                                 Text(
                                                     if (m == model) "$m  ✓" else m,
                                                     fontSize = 12.5.sp,
+                                                    color = if (m == model) Teal else Ink,
                                                     fontWeight = if (m == model) FontWeight.Bold else FontWeight.Medium,
                                                 )
                                             },
