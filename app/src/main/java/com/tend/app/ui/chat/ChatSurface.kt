@@ -2,13 +2,20 @@ package com.tend.app.ui.chat
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,8 +23,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,12 +48,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tend.app.ChatSize
 import com.tend.app.MainViewModel
@@ -52,6 +66,8 @@ import com.tend.app.Tab
 import com.tend.app.domain.chat.ChatMode
 import com.tend.app.ui.components.AttachmentStrip
 import com.tend.app.ui.components.tapNoRipple
+import com.tend.app.ui.motion.LocalReduceMotion
+import com.tend.app.ui.motion.LocalTendHaptics
 import com.tend.app.ui.motion.TendHaptic
 import com.tend.app.ui.motion.TendMotion
 import com.tend.app.ui.motion.bouncyTap
@@ -83,42 +99,116 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatSurface(vm: MainViewModel) {
     val shell by vm.shell.collectAsStateWithLifecycle()
+    val reduceMotion = LocalReduceMotion.current
 
-    when (shell.chatSize) {
-        ChatSize.Sheet -> Box(
-            Modifier
-                .fillMaxSize()
-                .background(Scrim)
-                // Dismissing by tapping away is a retreat, not an action — no buzz.
-                .tapNoRipple(TendHaptic.None) { vm.closeAi() },
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .tapNoRipple(TendHaptic.None) { /* eat clicks so the scrim doesn't dismiss */ }
-                    .background(Sheet, RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
-                    .imePadding(),
-            ) {
-                Box(
-                    Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(Modifier.width(36.dp).height(4.dp).background(Dashed, RoundedCornerShape(2.dp)))
-                }
-                ChatBody(vm, Modifier.heightIn(min = 120.dp, max = 340.dp))
-            }
-        }
+    val expansion by animateFloatAsState(
+        targetValue = if (shell.chatSize == ChatSize.FullScreen) 1f else 0f,
+        animationSpec = if (reduceMotion) snap() else TendMotion.Progress,
+        label = "chatExpansion",
+    )
 
-        ChatSize.FullScreen -> Column(
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(Scrim.copy(alpha = Scrim.alpha * (1f - expansion)))
+            // Dismissing by tapping away is a retreat, not an action — no buzz.
+            .tapNoRipple(TendHaptic.None) { vm.closeAi() },
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        val density = LocalDensity.current
+        val maxHeightPx = with(density) { maxHeight.toPx() }
+        var restingHeightPx by remember { mutableFloatStateOf(0f) }
+        val restingFraction = if (maxHeightPx > 0f) (restingHeightPx / maxHeightPx).coerceIn(0f, 1f) else 0f
+        val corner = 26.dp * (1f - expansion)
+        val insets = WindowInsets.systemBars.asPaddingValues()
+        val atRest = expansion == 0f
+
+        Column(
             Modifier
-                .fillMaxSize()
-                .background(Sheet)
-                .systemBarsPadding()
+                .fillMaxWidth()
+                .tapNoRipple(TendHaptic.None) { /* eat clicks so the scrim doesn't dismiss */ }
+                .then(
+                    if (atRest) Modifier.wrapContentHeight()
+                    else Modifier.fillMaxHeight(lerp(restingFraction, 1f, expansion).coerceIn(0f, 1f))
+                )
+                .background(Sheet, RoundedCornerShape(topStart = corner, topEnd = corner))
+                .padding(
+                    top = insets.calculateTopPadding() * expansion,
+                    bottom = insets.calculateBottomPadding() * expansion,
+                )
+                .then(
+                    if (atRest) Modifier.onSizeChanged { restingHeightPx = it.height.toFloat() }
+                    else Modifier
+                )
                 .imePadding(),
         ) {
-            ChatBody(vm, Modifier.weight(1f))
+            DragHandle(
+                chatSize = shell.chatSize,
+                onExpand = vm::expandChat,
+                onCollapse = vm::collapseChat,
+            )
+            ChatBody(vm, if (atRest) Modifier.heightIn(min = 120.dp, max = 340.dp) else Modifier.weight(1f))
         }
+    }
+}
+
+/**
+ * The drag-handle pill, doubling as the expand/collapse control.
+ *
+ * A swipe is decided once, at release, against a fixed threshold — the same
+ * discrete pattern as the tab swipe in `TendApp` — rather than tracked live,
+ * because [ChatSurface]'s expansion is state-driven: a drag that never
+ * crosses the threshold has nothing to snap back, only the pill's own
+ * press/drag feedback does.
+ */
+@Composable
+private fun DragHandle(chatSize: ChatSize, onExpand: () -> Unit, onCollapse: () -> Unit) {
+    val haptics = LocalTendHaptics.current
+    val reduceMotion = LocalReduceMotion.current
+    var dragging by remember { mutableStateOf(false) }
+
+    val scale by animateFloatAsState(
+        targetValue = if (dragging && !reduceMotion) TendMotion.PopScale else 1f,
+        animationSpec = if (dragging) TendMotion.PressDown else TendMotion.PressRelease,
+        label = "dragHandleScale",
+    )
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            // Before the padding, so the whole 24dp band is grabbable, not just the pill.
+            .pointerInput(chatSize) {
+                val thresholdPx = 48.dp.toPx()
+                var dragY = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { dragY = 0f; dragging = true },
+                    onDragEnd = {
+                        dragging = false
+                        when {
+                            chatSize == ChatSize.Sheet && dragY < -thresholdPx -> {
+                                haptics.perform(TendHaptic.Select)
+                                onExpand()
+                            }
+                            chatSize == ChatSize.FullScreen && dragY > thresholdPx -> {
+                                haptics.perform(TendHaptic.Select)
+                                onCollapse()
+                            }
+                        }
+                    },
+                    onDragCancel = { dragging = false; dragY = 0f },
+                    onVerticalDrag = { _, amount -> dragY += amount },
+                )
+            }
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .width(36.dp)
+                .height(4.dp)
+                .graphicsLayer { scaleX = scale; scaleY = scale }
+                .background(Dashed, RoundedCornerShape(2.dp))
+        )
     }
 }
 
@@ -150,8 +240,6 @@ private fun ChatBody(vm: MainViewModel, listModifier: Modifier) {
 
     ChatHeader(
         title = title,
-        size = shell.chatSize,
-        onToggleSize = { if (shell.chatSize == ChatSize.Sheet) vm.expandChat() else vm.collapseChat() },
         onThreads = { showThreads = true },
         onNewChat = { vm.newChat() },
         onSettings = { vm.closeAi(); vm.selectTab(Tab.Settings) },
@@ -262,8 +350,6 @@ private fun ChatBody(vm: MainViewModel, listModifier: Modifier) {
 @Composable
 private fun ChatHeader(
     title: String,
-    size: ChatSize,
-    onToggleSize: () -> Unit,
     onThreads: () -> Unit,
     onNewChat: () -> Unit,
     onSettings: () -> Unit,
@@ -286,7 +372,6 @@ private fun ChatHeader(
         )
         HeaderButton("✎", onNewChat)
         HeaderButton("☰", onThreads)
-        HeaderButton(if (size == ChatSize.Sheet) "⤢" else "⤡", onToggleSize)
         HeaderButton("⚙", onSettings)
         HeaderButton("✕", onClose)
     }
