@@ -1,5 +1,7 @@
 package com.tend.app.ui.chat
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -48,6 +50,7 @@ import com.tend.app.ChatSize
 import com.tend.app.MainViewModel
 import com.tend.app.Tab
 import com.tend.app.domain.chat.ChatMode
+import com.tend.app.ui.components.AttachmentStrip
 import com.tend.app.ui.components.tapNoRipple
 import com.tend.app.ui.motion.TendHaptic
 import com.tend.app.ui.motion.TendMotion
@@ -129,6 +132,14 @@ private fun ChatBody(vm: MainViewModel, listModifier: Modifier) {
     val effectiveMode by vm.effectiveChatMode.collectAsStateWithLifecycle()
     val threads by vm.threads.collectAsStateWithLifecycle()
     val activeThread by vm.activeThread.collectAsStateWithLifecycle()
+    val pending by vm.pendingAttachments.collectAsStateWithLifecycle()
+
+    // OpenDocument rather than GetContent: only the former can be granted a
+    // persistable permission, and without that an attachment stops resolving
+    // after a reboot.
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { vm.attachToDraft(it) }
+    }
 
     val scope = rememberCoroutineScope()
     var showThreads by remember { mutableStateOf(false) }
@@ -225,9 +236,12 @@ private fun ChatBody(vm: MainViewModel, listModifier: Modifier) {
         Chip("How's my week?") { vm.chipWeekSummary() }
     }
 
+    AttachmentStrip(pending) { vm.removePendingAttachment(it) }
+
     Composer(
         value = draft,
         onChange = vm::setDraft,
+        onAttach = { picker.launch(arrayOf("*/*")) },
         onSend = { vm.sendAi(draft) },
     )
 
@@ -384,12 +398,26 @@ private fun ThinkingBubble() {
 }
 
 @Composable
-private fun Composer(value: String, onChange: (String) -> Unit, onSend: () -> Unit) {
+private fun Composer(
+    value: String,
+    onChange: (String) -> Unit,
+    onAttach: () -> Unit,
+    onSend: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Box(
+            Modifier
+                .size(38.dp)
+                .background(SegBg, RoundedCornerShape(50))
+                .bouncyTap(haptic = TendHaptic.Select, onClick = onAttach),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("＋", fontSize = 16.sp, color = Muted)
+        }
         Box(
             Modifier
                 .weight(1f)

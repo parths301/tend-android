@@ -26,6 +26,7 @@ import com.tend.app.data.vault.UnlockResult
 import com.tend.app.data.vault.VaultSession
 import com.tend.app.data.vault.VaultState
 import com.tend.app.data.db.AppDatabase
+import com.tend.app.data.db.Attachment
 import com.tend.app.data.db.ChatMessage
 import com.tend.app.data.db.ChatThread
 import com.tend.app.data.db.Habit
@@ -47,6 +48,8 @@ import com.tend.app.domain.chat.MemoryCommand
 import com.tend.app.domain.chat.Personality
 import com.tend.app.domain.chat.ResponseSource
 import com.tend.app.notif.Notifications
+import com.tend.app.ui.components.PendingAttachment
+import com.tend.app.ui.components.readPickedFile
 import com.tend.app.notif.ReminderScheduler
 import com.tend.app.widget.TendWidgets
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +100,7 @@ data class HabitUi(
 data class ChatMsgUi(
     val message: ChatMessage,
     val links: List<EntityRef> = emptyList(),
+    val attachments: List<Attachment> = emptyList(),
 ) {
     val fromAi: Boolean get() = message.fromAi
     val text: String get() = message.text
@@ -240,16 +244,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val chat: StateFlow<List<ChatMsgUi>> =
-        combine(messagesFlow, linksFlow) { messages, links ->
-            val byMessage = links.groupBy { it.messageId }
+        combine(messagesFlow, linksFlow, attachmentsFlow) { messages, links, attachments ->
+            val linksByMessage = links.groupBy { it.messageId }
+            val filesByMessage = attachments.groupBy { it.ownerId }
             messages.map { message ->
                 ChatMsgUi(
                     message = message,
-                    links = byMessage[message.id].orEmpty().mapNotNull { link ->
+                    links = linksByMessage[message.id].orEmpty().mapNotNull { link ->
                         EntityRef.Type.from(link.entityType)?.let {
                             EntityRef(it, link.entityId, link.label)
                         }
                     },
+                    attachments = filesByMessage[message.id].orEmpty(),
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -265,6 +271,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Messages ticked for a bulk action. Transient by design; not persisted. */
     private val selectionState = MutableStateFlow<Set<Long>>(emptySet())
     val selection: StateFlow<Set<Long>> = selectionState.asStateFlow()
+
+    /** Files picked for the next message, alongside the draft. */
+    private val pendingAttachmentsState = MutableStateFlow<List<PendingAttachment>>(emptyList())
+    val pendingAttachments: StateFlow<List<PendingAttachment>> = pendingAttachmentsState.asStateFlow()
+
+    private val attachmentsFlow: StateFlow<List<Attachment>> =
+        activeThreadState
+            .flatMapLatest { id -> if (id == 0L) flowOf(emptyList()) else chatRepo.attachments(id) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
 
     val habits: StateFlow<List<HabitUi>> =
@@ -1017,7 +1032,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val history = chatRepo.historyFor(threadId)
                 draftState.value = ""
                 chatRepo.saveDraft(threadId, "")
-                chatRepo.append(threadId, fromAi = false, text = input, source = ResponseSource.System)
+                val userMessageId = chatRepo.append(
+                    threadId, fromAi = false, text = input, source = ResponseSource.System,
+                )
+
+                // Attachments belong to the message that carried them, so they
+                // are written before anything can fail downstream.
+                pendingAttachmentsState.value.takeIf { it.isNotEmpty() }?.let { pending ->
+                    chatRepo.attachTo(
+                        userMessageId,
+                        pending.map {
+                            Attachment(
+                                ownerType = ChatRepository.OWNER_MESSAGE,
+                                ownerId = userMessageId,
+                                uri = it.uri.toString(),
+                                mime = it.mime,
+                                displayName = it.displayName,
+                                sizeBytes = it.sizeBytes,
+                                createdAt = System.currentTimeMillis(),
+                            )
+                        },
+                    )
+                    pendingAttachmentsState.value = emptyList()
+                }
 
                 // Vault commands are answered here and return. Nothing is built,
                 // no engine runs, and in AI mode nothing is sent — the text never
@@ -1284,6 +1321,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setDraft(text: String) {
         draftState.value = text
+    }
+
+    /**
+     * Holds a picked file until the message is sent.
+     *
+     * The read permission is persisted at pick time, so the URI still resolves
+     * after a reboot — without that, every attachment in an old chat would
+     * become an unopenable dead reference.
+     */
+    fun attachToDraft(uri: Uri) {
+        val resolver = getApplication<Application>().contentResolver
+        runCatching {
+            resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        pendingAttachmentsState.update { it + readPickedFile(getApplication(), uri) }
+    }
+
+    fun removePendingAttachment(attachment: PendingAttachment) {
+        pendingAttachmentsState.update { it - attachment }
     }
 
     /** Drafts are per thread, so they survive switching away and back. */

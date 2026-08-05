@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import com.tend.app.ChatMsgUi
 import com.tend.app.domain.chat.EntityRef
 import com.tend.app.domain.chat.ResponseSource
+import com.tend.app.ui.components.AttachmentRow
 import com.tend.app.ui.components.tapNoRipple
 import com.tend.app.ui.motion.TendHaptic
 import com.tend.app.ui.motion.TendMotion
@@ -111,6 +112,10 @@ fun ChatMessageItem(
                 lineHeight = 19.5.sp,
                 color = textColor,
             )
+
+            // Same rendering primitive as memory and the detail screens, so an
+            // attachment looks and behaves identically wherever it appears.
+            msg.attachments.forEach { AttachmentRow(it) }
 
             // Chips come from message_links, never from reading the text, so a
             // chip always points at a row that was really created.
