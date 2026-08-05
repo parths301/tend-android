@@ -55,7 +55,9 @@ class BackupFileNamingTest {
         fun at(h: Int, d: Int) =
             LocalDateTime.of(2026, 8, d, h, 0).atZone(zone).toInstant().toEpochMilli()
 
-        val names = listOf(at(2, 3), at(2, 5), at(14, 4)).map { BackupManager.fileNameFor(it) }
+        // Chronological order in, lexicographic order out — that equivalence is
+        // what lets pruning keep the newest files by sorting on name alone.
+        val names = listOf(at(2, 3), at(14, 4), at(2, 5)).map { BackupManager.fileNameFor(it) }
         assertEquals(names.sorted(), names)
         assertTrue(names.all { it.startsWith("tend-backup-") && it.endsWith(".json") })
     }

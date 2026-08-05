@@ -464,19 +464,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             settings.setBackupFolder(uri.toString())
-            BackupScheduler.sync(getApplication())
+            BackupScheduler.sync(getApplication(), force = true)
             backupMessageState.value = "Backup folder set to ${BackupManager.folderLabel(uri.toString())}."
         }
     }
 
     fun setBackupInterval(interval: String) = viewModelScope.launch {
         settings.setBackupInterval(interval)
-        BackupScheduler.sync(getApplication())
+        BackupScheduler.sync(getApplication(), force = true)
     }
 
     fun setBackupMin(min: Int) = viewModelScope.launch {
         settings.setBackupMin(min)
-        BackupScheduler.sync(getApplication())
+        BackupScheduler.sync(getApplication(), force = true)
     }
 
     fun setBackupKeep(keep: Int) = viewModelScope.launch { settings.setBackupKeep(keep) }

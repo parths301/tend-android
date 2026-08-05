@@ -23,8 +23,15 @@ object BackupScheduler {
 
     const val WORK_NAME = "tend-auto-backup"
 
-    /** Brings the scheduled work in line with the saved interval and time. */
-    suspend fun sync(context: Context) {
+    /**
+     * Brings the scheduled work in line with the saved interval and time.
+     *
+     * [force] replaces an existing schedule, which is what a settings change
+     * means. Left false — the self-heal on app start — an existing schedule is
+     * kept: Doze can defer a 2 AM backup to mid-morning, and re-anchoring it
+     * every launch would keep pushing that deferred run out of reach.
+     */
+    suspend fun sync(context: Context, force: Boolean = false) {
         val settings = SettingsRepository(context)
         val interval = settings.backupInterval.first()
         val wm = WorkManager.getInstance(context.applicationContext)
@@ -49,9 +56,11 @@ object BackupScheduler {
             .addTag(WORK_NAME)
             .build()
 
-        // UPDATE keeps the existing work's identity, so changing the time
-        // doesn't reset the schedule to "starting over from now".
-        wm.enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
+        wm.enqueueUniquePeriodicWork(
+            WORK_NAME,
+            if (force) ExistingPeriodicWorkPolicy.UPDATE else ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
     }
 
     /** Pure: millis until the next occurrence of [atMin] strictly after [nowMillis]. */
