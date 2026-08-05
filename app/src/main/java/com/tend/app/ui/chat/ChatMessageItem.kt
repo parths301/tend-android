@@ -26,8 +26,6 @@ import com.tend.app.ui.components.tapNoRipple
 import com.tend.app.ui.motion.TendHaptic
 import com.tend.app.ui.motion.TendMotion
 import com.tend.app.ui.motion.bouncyTap
-import com.tend.app.ui.theme.AiTint
-import com.tend.app.ui.theme.AiTintBorder
 import com.tend.app.ui.theme.Card
 import com.tend.app.ui.theme.CardBorder
 import com.tend.app.ui.theme.ContextBorder
@@ -45,8 +43,10 @@ import com.tend.app.ui.theme.Terracotta
 /**
  * One message, in whichever of its states applies.
  *
- * The three tints are mutually exclusive and checked in a fixed order —
- * selection wins over context, which wins over "a model wrote this" — so a
+ * A model-written message gets no tint of its own — it sits on the ordinary
+ * card surface and is marked by its "AI"/"OFFLINE" tag alone. The two tints
+ * that remain are mutually exclusive and checked in a fixed order — selection
+ * wins over context — so a tint always means "this message is marked", and a
  * message can never show two meanings at once.
  */
 @Composable
@@ -68,14 +68,12 @@ fun ChatMessageItem(
     val background = when {
         selected -> SelectionTint
         msg.inContext -> ContextTint
-        generated -> AiTint
         msg.fromAi -> Card
         else -> Ink
     }
     val outline = when {
         selected -> SelectionBorder
         msg.inContext -> ContextBorder
-        generated -> AiTintBorder
         msg.fromAi -> CardBorder
         else -> Color.Transparent
     }
@@ -101,7 +99,7 @@ fun ChatMessageItem(
         ) {
             if (generated || msg.inContext) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (generated) MessageTag(msg.source.tagLabel, Terracotta)
+                    if (generated) MessageTag(msg.source.tagLabel, Muted)
                     if (msg.inContext) MessageTag("IN CONTEXT", ContextBorder)
                 }
             }
