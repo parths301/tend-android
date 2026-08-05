@@ -15,6 +15,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -31,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tend.app.MainViewModel
 import com.tend.app.data.db.TaskItem
 import com.tend.app.domain.Time
+import com.tend.app.domain.chat.EntityRef
 import com.tend.app.ui.components.CheckCircle
 import com.tend.app.ui.components.DashedAddBox
 import com.tend.app.ui.components.DialogInput
@@ -62,6 +64,17 @@ fun TasksScreen(vm: MainViewModel) {
     val left = tasks.size - done
 
     var editing by remember { mutableStateOf<TaskItem?>(null) }
+
+    // A chat chip pointing at a task lands here. Opening the existing editor is
+    // what makes the chip lead to the real thing rather than just the right tab,
+    // and it means no parallel task-detail screen has to exist.
+    val shell by vm.shell.collectAsStateWithLifecycle()
+    LaunchedEffect(shell.focusRef, tasks) {
+        val ref = shell.focusRef ?: return@LaunchedEffect
+        if (ref.type != EntityRef.Type.Task) return@LaunchedEffect
+        tasks.firstOrNull { it.id == ref.id }?.let { editing = it }
+        vm.consumeFocusRef()
+    }
 
     Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp)) {
         Column(Modifier.padding(bottom = 14.dp)) {

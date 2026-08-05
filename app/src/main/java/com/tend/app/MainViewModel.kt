@@ -174,6 +174,12 @@ data class Shell(
     val chatSize: ChatSize = ChatSize.Sheet,
     val detailHabitId: Long = 1L,
     val planDay: Long = LocalDate.now().toEpochDay(),
+    /**
+     * An item a chat chip asked to open. The destination screen consumes this
+     * and pops its own editor, so a link lands on the real edit surface rather
+     * than just the right tab — and no second detail screen has to exist.
+     */
+    val focusRef: EntityRef? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -1305,22 +1311,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun resolveLink(ref: EntityRef): Boolean = when (ref.type) {
         EntityRef.Type.Habit -> repo.habitById(ref.id)?.let {
-            shellState.update { s -> s.copy(tab = Tab.Detail, detailHabitId = ref.id, aiOpen = false) }
+            shellState.update { s ->
+                s.copy(tab = Tab.Detail, detailHabitId = ref.id, aiOpen = false, focusRef = null)
+            }
             true
         } ?: false
 
         EntityRef.Type.Task -> repo.taskById(ref.id)?.let {
-            shellState.update { s -> s.copy(tab = Tab.Tasks, aiOpen = false) }
+            shellState.update { s -> s.copy(tab = Tab.Tasks, aiOpen = false, focusRef = ref) }
             true
         } ?: false
 
         EntityRef.Type.Plan -> repo.planBlockById(ref.id)?.let { block ->
             shellState.update { s ->
-                s.copy(tab = Tab.Plan, planDay = block.epochDay, aiOpen = false)
+                s.copy(tab = Tab.Plan, planDay = block.epochDay, aiOpen = false, focusRef = ref)
             }
             true
         } ?: false
     }
+
+    /** Called by a destination once it has opened the editor for [Shell.focusRef]. */
+    fun consumeFocusRef() = shellState.update { it.copy(focusRef = null) }
 
     private fun stateSummary(): String {
         val habitLines = habits.value.joinToString("\n") {

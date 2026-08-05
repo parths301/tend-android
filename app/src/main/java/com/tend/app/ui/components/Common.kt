@@ -40,7 +40,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tend.app.data.SettingsRepository
-import com.tend.app.domain.Time
 import com.tend.app.ui.motion.LocalReduceMotion
 import com.tend.app.ui.motion.LocalTendHaptics
 import com.tend.app.ui.motion.TendHaptic
@@ -56,7 +55,6 @@ import com.tend.app.ui.theme.Faint
 import com.tend.app.ui.theme.Ink
 import com.tend.app.ui.theme.Muted
 import com.tend.app.ui.theme.RingTrack
-import com.tend.app.ui.theme.SegBg
 import com.tend.app.ui.theme.SpaceGrotesk
 
 /**
@@ -286,33 +284,6 @@ fun DialogInput(value: String, onChange: (String) -> Unit, placeholder: String) 
 }
 
 /** Square −/+ stepper button. Ticks like a dial, since it's held down and repeated. */
-@Composable
-fun Stepper(glyph: String, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(30.dp)
-            .background(SegBg, RoundedCornerShape(10.dp))
-            .bouncyTap(haptic = TendHaptic.Select, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(glyph, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink)
-    }
-}
-
-/** "− 9:00 AM +" row stepping a minutes-since-midnight value in 15-min increments. */
-@Composable
-fun TimeStepperRow(valueMin: Int, onChange: (Int) -> Unit, hint: String = "15-min steps") {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Stepper("−") { onChange((valueMin - 15).coerceAtLeast(0)) }
-        Text(
-            Time.clockAmPm(valueMin), fontFamily = SpaceGrotesk,
-            fontSize = 16.sp, fontWeight = FontWeight.Bold,
-        )
-        Stepper("+") { onChange((valueMin + 15).coerceAtMost(23 * 60 + 45)) }
-        Text(hint, fontSize = 11.sp, color = Faint)
-    }
-}
-
 /** Category chips: presets + user customs + "+ New" inline creator. */
 @Composable
 fun CategoryPicker(

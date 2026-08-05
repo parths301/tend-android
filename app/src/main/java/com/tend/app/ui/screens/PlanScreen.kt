@@ -37,6 +37,7 @@ import com.tend.app.MainViewModel
 import com.tend.app.data.CalEvent
 import com.tend.app.data.db.PlanBlock
 import com.tend.app.domain.Time
+import com.tend.app.domain.chat.EntityRef
 import com.tend.app.pdf.PlanPdfExporter
 import com.tend.app.ui.components.CheckCircle
 import com.tend.app.ui.components.DialogInput
@@ -103,6 +104,14 @@ fun PlanScreen(vm: MainViewModel) {
 
     var showAdd by rememberSaveable { mutableStateOf(false) }
     var editing by remember { mutableStateOf<PlanBlock?>(null) }
+
+    // Same contract as TasksScreen: a chat chip opens the block's own editor.
+    LaunchedEffect(shell.focusRef, plan) {
+        val ref = shell.focusRef ?: return@LaunchedEffect
+        if (ref.type != EntityRef.Type.Plan) return@LaunchedEffect
+        plan.firstOrNull { it.id == ref.id }?.let { editing = it }
+        vm.consumeFocusRef()
+    }
 
     Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp)) {
         // Header
