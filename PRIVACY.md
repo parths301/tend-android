@@ -65,6 +65,33 @@ and `X-OpenRouter-Title`) that identify the *app*, not you. Tend does not send
 your name, email, device id, or any of your habits, tasks or notes beyond the
 summary described above.
 
+## Memory (the encrypted vault)
+
+Memory is a separate, encrypted store for notes and files. Three things about it
+are worth stating plainly:
+
+1. **It is encrypted with a key derived from your password**, which is never
+   stored anywhere. Tend cannot read your vault, and neither can anyone with a
+   copy of the app's database.
+2. **It is never sent to any AI provider**, in either mode. This is not a
+   setting you could accidentally turn off — the code that builds an AI request
+   has no access to the vault at all. The `add to memory` and `search memory`
+   commands are handled entirely on your device and are never transmitted, even
+   when AI mode is on.
+3. **It is excluded from backups.** Backup files are plain JSON in ordinary
+   storage; putting vault contents there would defeat the encryption.
+
+If you forget your password, the recovery code shown when you created the vault
+is the only other way in. If you lose both, the contents cannot be recovered —
+by anyone, including the developer. That is what makes the encryption real.
+
+## Attachments
+
+Files you attach to a chat message stay where they already are on your device;
+Tend stores a reference to them. Files you add to **Memory** are copied into the
+app's private storage and encrypted, and the original is left untouched.
+
+
 ## Your API key
 
 Your API key is stored encrypted on your device, in
@@ -77,8 +104,9 @@ device it was entered on. It is also never written into Tend's own backup files.
 
 Tend can write a backup file, on demand or on a schedule, into a folder you
 choose with the Android file picker. The file contains your habits, check-ins,
-tasks, plans, notes and app settings, in plain JSON — deliberately readable, so
-your data isn't trapped in this app. It does **not** contain your API key.
+tasks, plans, notes, chat history and app settings, in plain JSON —
+deliberately readable, so your data isn't trapped in this app. It does **not**
+contain your API key, and it does **not** contain anything from Memory.
 
 Tend writes that file and nothing more: it does not upload backups anywhere. If
 the folder you choose is itself synced by another app — Google Drive, Dropbox,

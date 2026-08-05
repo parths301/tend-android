@@ -15,8 +15,9 @@ and [`chats/chat1.md`](chats/chat1.md)).
 | **Stats** | Stat tiles, dark insights card, 30-day focus-hours trend, per-habit completion bars |
 | **Widgets** | Dark home-screen widget mockups: streak, quick-check, heatmap, Deep Work bars |
 | **Habit detail** | Month calendar (with month paging), streak/best/rate tiles, notes with add-note input |
-| **Ask Tend** | Bottom-sheet AI chat on every main tab — type "add buy groceries at 5pm" and it lands in your plan; suggestion chips for planning and weekly summary |
-| **Settings** | BYOK API keys for Gemini / Claude / OpenRouter (encrypted on-device), searchable model picker, heatmap width, AI bar toggle, backup & restore — reachable via the ⚙ in the Ask Tend sheet |
+| **Ask Tend** | Persisted chat with an AI/Offline toggle, threads (new, switch, rename, pin, search, clear, delete), message selection and deletion, attachments, and a sheet that expands to full screen. Anything it creates shows as a tappable chip on the message that made it |
+| **Memory** | Encrypted vault for notes and files, password-protected with a one-time recovery code. Structurally excluded from everything the assistant sees |
+| **Settings** | System status, BYOK keys for Gemini / Claude / OpenRouter (encrypted on-device), searchable model picker, AI personalities, raw prompt and JSON config with validation, backup & restore, and a plain-language explanation of what each mode actually sends |
 
 **Swipe left/right** anywhere on the four main tabs to switch between them.
 
@@ -25,14 +26,48 @@ and [`chats/chat1.md`](chats/chat1.md)).
 - **UI**: single-activity Jetpack Compose, custom components matching the prototype pixel values
   (Space Grotesk display font bundled in `res/font/`)
 - **State**: one `MainViewModel` exposing `StateFlow`s; screens are pure functions of state
-- **Persistence**: Room (`habits`, `habit_logs`, `tasks`, `plan_blocks`, `notes`), seeded on first
-  launch with the prototype's demo data (deterministic LCG history so heatmaps look right)
+- **Persistence**: Room v4 — `habits`, `habit_logs`, `tasks`, `plan_blocks`, `notes`,
+  `chat_threads`, `chat_messages`, `message_links`, `attachments`, `memory_entries`.
+  Migrations are hand-written and checked by `RoomSchemaTest`, which diffs the DDL
+  against the schema Room generates; without an emulator in CI that test is what
+  stands between a wrong `CREATE TABLE` and a crash on a real upgrade.
 - **Settings**: Jetpack DataStore; API keys are stored in `EncryptedSharedPreferences`, one per
   provider, so switching providers doesn't lose the other key
 - **AI**: "Ask Tend" works offline out of the box. Offline is **not** a local model — it's a
   regex rule engine in `AiProtocol.simulate()`: habit-sounding phrasing becomes a habit, "at 5pm"
   becomes a plan block, anything else becomes a task, and whole-day planning is declined rather
   than faked. Add a key for the real thing.
+
+### Chat pipeline
+
+Both modes run through one path. `AiExecutionRouter` is the only dispatcher, and
+`buildRequest` is the single place where mode → context policy → what-gets-sent
+is decided, so "what did we actually send?" has one answer:
+
+| Mode | Engine | Context |
+|---|---|---|
+| **AI** | `CloudAssistantEngine` → BYOK provider | recent history (window is user-tunable) + a state summary |
+| **Offline** | `LocalAssistantEngine` → rule engine | only the message you typed, plus any you explicitly marked |
+
+AI mode with no key resolves to offline and says so, rather than appearing to
+work. Anything either engine creates comes back as an `EntityRef` built from the
+row id the DAO already returned, and is stored in `message_links` — chips are
+never matched from reply text, so they survive renames and report deletions.
+
+### Memory vault
+
+A random 256-bit data key encrypts every entry; that key is wrapped twice, under
+a PBKDF2 key from the password and under one from a one-time recovery code. The
+password is never stored, so changing it re-wraps rather than re-encrypts, and
+losing both secrets means the contents are gone by construction.
+
+Isolation is structural: `MemoryRepository` is not a dependency of the router or
+either engine, so there is no reference through which vault text could reach a
+request. `add to memory` / `search memory` are parsed in pure domain code and
+executed in the ViewModel — a recognised command never becomes a request at all.
+
+Search decrypts and scans in memory while unlocked. A blind index would leak
+token equality; scanning leaks nothing and is imperceptible at realistic sizes.
 
 ### Providers (BYOK)
 
@@ -99,7 +134,8 @@ placeholders** — replace them with designed animations, keeping the filenames.
 ## Backup & restore
 
 Settings → **Backup & restore** writes everything (habits, check-ins, tasks,
-plans, notes, settings) as a single self-describing JSON file into a folder you
+plans, notes, chat history, settings — but never the vault or your API keys) as
+a single self-describing JSON file into a folder you
 pick once with the system file picker:
 
 ```
