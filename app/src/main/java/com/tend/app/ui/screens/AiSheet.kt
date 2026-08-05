@@ -43,6 +43,8 @@ import com.tend.app.ChatMsg
 import com.tend.app.MainViewModel
 import com.tend.app.Tab
 import com.tend.app.ui.components.tapNoRipple
+import com.tend.app.ui.motion.TendHaptic
+import com.tend.app.ui.motion.bouncyTap
 import com.tend.app.ui.theme.Border
 import com.tend.app.ui.theme.Card
 import com.tend.app.ui.theme.CardBorder
@@ -67,13 +69,14 @@ fun AiSheet(vm: MainViewModel) {
         Modifier
             .fillMaxSize()
             .background(Scrim)
-            .tapNoRipple { vm.closeAi() },
+            // Dismissing by tapping away is a retreat, not an action — no buzz.
+            .tapNoRipple(TendHaptic.None) { vm.closeAi() },
         contentAlignment = Alignment.BottomCenter,
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .tapNoRipple { /* eat clicks so the scrim doesn't dismiss */ }
+                .tapNoRipple(TendHaptic.None) { /* eat clicks so the scrim doesn't dismiss */ }
                 .background(Sheet, RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
                 .imePadding(),
         ) {
@@ -183,7 +186,7 @@ fun AiSheet(vm: MainViewModel) {
                     Modifier
                         .size(44.dp)
                         .background(Ink, RoundedCornerShape(50))
-                        .tapNoRipple { send() },
+                        .bouncyTap(haptic = TendHaptic.Confirm) { send() },
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("↑", fontSize = 17.sp, color = Cream)
@@ -226,7 +229,7 @@ private fun Chip(label: String, onClick: () -> Unit) {
     Box(
         Modifier
             .border(1.dp, Border, RoundedCornerShape(99.dp))
-            .tapNoRipple(onClick)
+            .bouncyTap(haptic = TendHaptic.Select, onClick = onClick)
             .padding(horizontal = 13.dp, vertical = 8.dp)
     ) {
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = ChipText)

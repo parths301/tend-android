@@ -30,9 +30,12 @@ import com.tend.app.widget.TendWidgets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -44,6 +47,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 
 enum class Tab { Today, Plan, Tasks, Stats, Detail, Settings }
@@ -69,6 +73,26 @@ data class ModelsUi(
     val models: List<String> = emptyList(),
     val error: String? = null,
 )
+
+/**
+ * Auto-plan's reply to the user. Carries whether it worked, so the banner can
+ * express the outcome — string-matching the text to guess at failure would
+ * break the first time the wording changed.
+ */
+data class AutoPlanMessage(val text: String, val failed: Boolean)
+
+/**
+ * A moment worth celebrating on screen. Kept in the ViewModel rather than in the
+ * UI because "did this check-off finish the day" is a question about state, not
+ * about a button — the same rule has to hold however the habit got checked.
+ */
+data class Celebration(
+    val kind: Kind,
+    val headline: String,
+    val detail: String,
+) {
+    enum class Kind { DayComplete, StreakMilestone }
+}
 
 /** Outcome of the most recent backup attempt, scheduled or manual. */
 data class BackupStatus(
@@ -217,10 +241,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val modelsState = MutableStateFlow(ModelsUi())
     val models: StateFlow<ModelsUi> = modelsState.asStateFlow()
 
+    /**
+     * One-shot celebration events. A SharedFlow with replay 0, so rotating the
+     * device or returning to the screen never replays a party the user already
+     * saw; [celebratedDay] keeps the day-complete moment to once per day.
+     */
+    private val celebrationEvents = MutableSharedFlow<Celebration>(extraBufferCapacity = 1)
+    val celebrations: SharedFlow<Celebration> = celebrationEvents.asSharedFlow()
+    private var celebratedDay: Long? = null
+
     private val autoPlanningState = MutableStateFlow(false)
     val autoPlanning: StateFlow<Boolean> = autoPlanningState.asStateFlow()
-    private val autoPlanMessageState = MutableStateFlow<String?>(null)
-    val autoPlanMessage: StateFlow<String?> = autoPlanMessageState.asStateFlow()
+    private val autoPlanMessageState = MutableStateFlow<AutoPlanMessage?>(null)
+    val autoPlanMessage: StateFlow<AutoPlanMessage?> = autoPlanMessageState.asStateFlow()
 
     init {
         Notifications.ensureChannels(app)
@@ -271,10 +304,55 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── data actions ────────────────────────────────────────────
     fun toggleHabit(habitId: Long) {
-        val habit = habits.value.firstOrNull { it.habit.id == habitId }?.habit ?: return
+        val existing = habits.value.firstOrNull { it.habit.id == habitId } ?: return
+        val wasDone = existing.doneToday
         viewModelScope.launch {
-            repo.toggleHabitToday(habit, today)
+            repo.toggleHabitToday(existing.habit, today)
             TendWidgets.refresh(getApplication())
+            // Only a check-*on* can be a celebration; un-checking never is.
+            if (!wasDone) maybeCelebrate(habitId)
+        }
+    }
+
+    /**
+     * Decides whether the check-off that just happened deserves a celebration.
+     *
+     * Room's flow is the source of truth for "is it done now", so this waits for
+     * the write to surface rather than predicting it — but with a timeout, since
+     * a timed habit needs several taps before it flips and must not leave a
+     * coroutine parked forever.
+     */
+    private suspend fun maybeCelebrate(habitId: Long) {
+        val settled = withTimeoutOrNull(WRITE_SETTLE_MS) {
+            habits.first { list -> list.firstOrNull { it.habit.id == habitId }?.doneToday == true }
+        } ?: return
+
+        val justChecked = settled.firstOrNull { it.habit.id == habitId } ?: return
+
+        // Finishing every habit for the day outranks any single streak.
+        if (settled.isNotEmpty() && settled.all { it.doneToday }) {
+            if (celebratedDay != today) {
+                celebratedDay = today
+                celebrationEvents.tryEmit(
+                    Celebration(
+                        kind = Celebration.Kind.DayComplete,
+                        headline = "Day complete",
+                        detail = "All ${settled.size} habits done. " +
+                            "That's what tomorrow's streak is built on.",
+                    )
+                )
+            }
+            return
+        }
+
+        if (justChecked.streak in STREAK_MILESTONES) {
+            celebrationEvents.tryEmit(
+                Celebration(
+                    kind = Celebration.Kind.StreakMilestone,
+                    headline = "${justChecked.streak}-day streak",
+                    detail = "${justChecked.habit.name} — your best is ${justChecked.best}.",
+                )
+            )
         }
     }
 
@@ -367,8 +445,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (day != today || autoPlanningState.value) return
         val key = apiKey.value
         if (key.isBlank()) {
-            autoPlanMessageState.value =
-                "Auto-plan needs an AI key — add your ${SettingsRepository.providerLabel(provider.value)} key in Settings."
+            autoPlanMessageState.value = AutoPlanMessage(
+                "Auto-plan needs an AI key — add your ${SettingsRepository.providerLabel(provider.value)} key in Settings.",
+                failed = true,
+            )
             return
         }
         autoPlanningState.value = true
@@ -394,7 +474,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val parsed = AiProtocol.parseAutoPlan(raw)
                 if (parsed == null) {
-                    autoPlanMessageState.value = "Auto-plan returned something unexpected — try again."
+                    autoPlanMessageState.value =
+                        AutoPlanMessage("Auto-plan returned something unexpected — try again.", failed = true)
                     return@launch
                 }
                 val (reply, blocks) = parsed
@@ -412,9 +493,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     },
                 )
-                autoPlanMessageState.value = reply
+                autoPlanMessageState.value = AutoPlanMessage(reply, failed = false)
             } catch (e: Exception) {
-                autoPlanMessageState.value = "Auto-plan failed: ${e.message?.take(100) ?: "network error"}"
+                autoPlanMessageState.value =
+                    AutoPlanMessage("Auto-plan failed: ${e.message?.take(100) ?: "network error"}", failed = true)
             } finally {
                 autoPlanningState.value = false
             }
@@ -759,5 +841,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 )
             )
         }
+    }
+
+    private companion object {
+        /** Streak lengths worth interrupting the screen for. */
+        val STREAK_MILESTONES = setOf(3, 7, 14, 30, 50, 100, 150, 200, 365)
+
+        /** How long to wait for a check-off to surface through Room before giving up. */
+        const val WRITE_SETTLE_MS = 1_500L
     }
 }

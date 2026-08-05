@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,11 @@ import com.tend.app.ui.components.Stepper
 import com.tend.app.ui.components.TendCard
 import com.tend.app.ui.components.TimeStepperRow
 import com.tend.app.ui.components.tapNoRipple
+import com.tend.app.ui.motion.LocalTendHaptics
+import com.tend.app.ui.motion.TendHaptic
+import com.tend.app.ui.motion.bouncyTap
+import com.tend.app.ui.motion.shakeOnError
+import com.tend.app.ui.motion.successPop
 import com.tend.app.ui.theme.Border
 import com.tend.app.ui.theme.Cream
 import com.tend.app.ui.theme.Dashed
@@ -142,7 +148,7 @@ fun PlanScreen(vm: MainViewModel) {
                 Box(
                     Modifier
                         .background(if (autoPlanning) Disabled else Terracotta, RoundedCornerShape(99.dp))
-                        .tapNoRipple { if (!autoPlanning) vm.autoPlan() }
+                        .bouncyTap { if (!autoPlanning) vm.autoPlan() }
                         .padding(horizontal = 13.dp, vertical = 8.dp)
                 ) {
                     Text(
@@ -166,15 +172,34 @@ fun PlanScreen(vm: MainViewModel) {
             }
         }
 
+        // Auto-plan is a slow, remote call, so its answer has to arrive with
+        // some weight: a plan that landed pops and confirms, one that failed
+        // shakes and rejects.
         autoMessage?.let { message ->
-            TendCard(Modifier.fillMaxWidth().padding(bottom = 12.dp), corner = 16.dp) {
+            val haptics = LocalTendHaptics.current
+            LaunchedEffect(message) {
+                haptics.perform(if (message.failed) TendHaptic.Reject else TendHaptic.Confirm)
+            }
+            TendCard(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+                    .shakeOnError(if (message.failed) message else null)
+                    .successPop(!message.failed),
+                corner = 16.dp,
+            ) {
                 Row(
                     Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text("✦", fontSize = 13.sp, color = Terracotta)
-                    Text(message, fontSize = 12.5.sp, lineHeight = 17.5.sp, modifier = Modifier.weight(1f))
+                    Text(
+                        message.text,
+                        fontSize = 12.5.sp,
+                        lineHeight = 17.5.sp,
+                        modifier = Modifier.weight(1f),
+                    )
                     Text(
                         "✕", fontSize = 12.sp, color = Faint,
                         modifier = Modifier.tapNoRipple { vm.clearAutoPlanMessage() },

@@ -71,6 +71,10 @@ import com.tend.app.ui.components.Stepper
 import com.tend.app.ui.components.TendCard
 import com.tend.app.ui.components.TimeStepperRow
 import com.tend.app.ui.components.tapNoRipple
+import com.tend.app.ui.motion.LocalTendHaptics
+import com.tend.app.ui.motion.TendHaptic
+import com.tend.app.ui.motion.bouncyTap
+import com.tend.app.ui.motion.shakeOnError
 import com.tend.app.ui.theme.Border
 import com.tend.app.ui.theme.Card
 import com.tend.app.ui.theme.Cream
@@ -525,6 +529,7 @@ private fun BackupCard(vm: MainViewModel) {
     val pendingRestore by vm.pendingRestore.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
+    val haptics = LocalTendHaptics.current
     val hasFolder = folder.isNotBlank()
     val scheduled = interval != SettingsRepository.BACKUP_OFF
 
@@ -630,10 +635,20 @@ private fun BackupCard(vm: MainViewModel) {
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                var noFolderTick by remember { mutableIntStateOf(0) }
                 Box(
                     Modifier
+                        .shakeOnError(if (noFolderTick == 0) null else noFolderTick)
                         .background(if (hasFolder && !busy) Ink else Faint, RoundedCornerShape(99.dp))
-                        .tapNoRipple { if (hasFolder && !busy) vm.backupNow() }
+                        .bouncyTap(haptic = if (hasFolder) TendHaptic.Confirm else TendHaptic.Reject) {
+                            when {
+                                busy -> Unit
+                                hasFolder -> vm.backupNow()
+                                // Points at the thing that's missing instead of
+                                // swallowing the tap.
+                                else -> noFolderTick++
+                            }
+                        }
                         .padding(horizontal = 16.dp, vertical = 9.dp)
                 ) {
                     Text(
@@ -655,13 +670,29 @@ private fun BackupCard(vm: MainViewModel) {
                 OutlinePill("Restore…") { if (!busy) restorePicker.launch(arrayOf("*/*")) }
             }
 
-            message?.let {
+            // A backup that failed and one that worked used to read identically —
+            // same row, same weight. Now failure shakes once and buzzes Reject,
+            // success ticks a Confirm, so the outcome registers before the text
+            // is even read.
+            message?.let { text ->
+                val failed = status.failed
+                LaunchedEffect(text) {
+                    haptics.perform(if (failed) TendHaptic.Reject else TendHaptic.Confirm)
+                }
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier
+                        .fillMaxWidth()
+                        .shakeOnError(if (failed) text else null),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(it, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.weight(1f))
+                    Text(
+                        text,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = if (failed) Terracotta else Ink,
+                        modifier = Modifier.weight(1f),
+                    )
                     Text(
                         "✕", fontSize = 12.sp, color = Faint,
                         modifier = Modifier.tapNoRipple { vm.clearBackupMessage() },
@@ -752,7 +783,7 @@ private fun OutlinePill(label: String, onClick: () -> Unit) {
     Box(
         Modifier
             .border(1.dp, Border, RoundedCornerShape(99.dp))
-            .tapNoRipple(onClick)
+            .bouncyTap(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 9.dp)
     ) {
         Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
@@ -764,7 +795,7 @@ private fun ProviderButton(modifier: Modifier, label: String, selected: Boolean,
     Box(
         modifier
             .background(if (selected) Card else Color.Transparent, RoundedCornerShape(9.dp))
-            .tapNoRipple(onClick)
+            .bouncyTap(haptic = TendHaptic.Select, onClick = onClick)
             .padding(vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {

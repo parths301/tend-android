@@ -17,7 +17,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,6 +48,10 @@ import com.tend.app.ui.components.ScreenTitle
 import com.tend.app.ui.components.TendCard
 import com.tend.app.ui.components.TimeStepperRow
 import com.tend.app.ui.components.tapNoRipple
+import com.tend.app.ui.motion.TendHaptic
+import com.tend.app.ui.motion.bouncyTap
+import com.tend.app.ui.motion.shakeOnError
+import com.tend.app.ui.motion.successPop
 import com.tend.app.ui.theme.Border
 import com.tend.app.ui.theme.Card
 import com.tend.app.ui.theme.Cream
@@ -109,7 +115,7 @@ fun TodayScreen(vm: MainViewModel) {
                         Modifier
                             .background(if (selected) Ink else Color.Transparent, RoundedCornerShape(99.dp))
                             .border(1.dp, if (selected) Ink else Border, RoundedCornerShape(99.dp))
-                            .tapNoRipple { vm.setFilter(cat) }
+                            .bouncyTap(haptic = TendHaptic.Select) { vm.setFilter(cat) }
                             .padding(horizontal = 13.dp, vertical = 7.dp)
                     ) {
                         Text(
@@ -262,11 +268,20 @@ fun HabitDialog(
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val canSave = name.trim().isNotEmpty()
+                    // Tapping Save with an empty name shakes the button and buzzes
+                    // Reject, rather than doing nothing and leaving the user to
+                    // guess which field is wrong.
+                    var rejectTick by remember { mutableIntStateOf(0) }
                     Box(
                         Modifier
+                            .shakeOnError(if (rejectTick == 0) null else rejectTick)
                             .background(if (canSave) Ink else Disabled, RoundedCornerShape(99.dp))
-                            .tapNoRipple {
-                                if (canSave) onSave(name, category, type, goal, if (reminderOn) reminderMin else null)
+                            .bouncyTap(haptic = if (canSave) TendHaptic.Confirm else TendHaptic.Reject) {
+                                if (canSave) {
+                                    onSave(name, category, type, goal, if (reminderOn) reminderMin else null)
+                                } else {
+                                    rejectTick++
+                                }
                             }
                             .padding(horizontal = 18.dp, vertical = 10.dp)
                     ) {
@@ -275,7 +290,7 @@ fun HabitDialog(
                     Box(
                         Modifier
                             .border(1.dp, Border, RoundedCornerShape(99.dp))
-                            .tapNoRipple(onDismiss)
+                            .bouncyTap(onClick = onDismiss)
                             .padding(horizontal = 18.dp, vertical = 10.dp)
                     ) {
                         Text("Cancel", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Muted)
@@ -291,7 +306,7 @@ private fun SegChoice(modifier: Modifier, label: String, selected: Boolean, onCl
     Box(
         modifier
             .background(if (selected) Card else Color.Transparent, RoundedCornerShape(8.dp))
-            .tapNoRipple(onClick)
+            .bouncyTap(haptic = TendHaptic.Select, onClick = onClick)
             .padding(vertical = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -341,7 +356,7 @@ private fun SegButton(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
             .background(if (selected) Card else Color.Transparent, RoundedCornerShape(8.dp))
-            .tapNoRipple(onClick)
+            .bouncyTap(haptic = TendHaptic.Select, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
         Text(
@@ -418,6 +433,15 @@ private fun HabitCard(
     }
 }
 
+/**
+ * The habit check-off — the action this app exists for, and the one a user
+ * repeats every day. It gets the fullest treatment in the motion system:
+ * squash on press, a pop when it lands, and a confirm haptic timed to the tap.
+ *
+ * A timed habit accumulates in 30-minute chunks, so a tap that doesn't complete
+ * it gets the lighter Select tick rather than a Confirm. Reserving Confirm for
+ * an actual completion is what stops it becoming background noise.
+ */
 @Composable
 fun HabitCheckButton(
     h: HabitUi,
@@ -427,14 +451,20 @@ fun HabitCheckButton(
     onToggle: () -> Unit,
 ) {
     val isTime = h.habit.type == "time"
+    val checkHaptic = when {
+        h.doneToday -> TendHaptic.ToggleOff
+        isTime -> TendHaptic.Select
+        else -> TendHaptic.Confirm
+    }
     Box(
         Modifier
             .size(size)
+            .successPop(h.doneToday)
             .then(
                 if (h.doneToday) Modifier.background(color, RoundedCornerShape(corner))
                 else Modifier.border(1.5.dp, Border, RoundedCornerShape(corner))
             )
-            .tapNoRipple(onToggle),
+            .bouncyTap(haptic = checkHaptic, onClick = onToggle),
         contentAlignment = Alignment.Center,
     ) {
         when {

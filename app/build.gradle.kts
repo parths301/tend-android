@@ -95,6 +95,10 @@ dependencies {
     implementation("androidx.glance:glance:1.1.1")
     implementation("androidx.glance:glance-appwidget:1.1.1")
 
+    // Celebration animations. Micro-interactions use Compose's own animation
+    // APIs; Lottie is reserved for the few high-emotion moments.
+    implementation("com.airbnb.android:lottie-compose:6.7.1")
+
     // Room
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

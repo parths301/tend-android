@@ -23,8 +23,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -37,9 +41,14 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tend.app.Celebration
 import com.tend.app.MainViewModel
 import com.tend.app.Tab
-import com.tend.app.ui.components.tapNoRipple
+import com.tend.app.ui.motion.CelebrationOverlay
+import com.tend.app.ui.motion.CelebrationStyle
+import com.tend.app.ui.motion.TendHaptic
+import com.tend.app.ui.motion.TendMotion
+import com.tend.app.ui.motion.bouncyTap
 import com.tend.app.ui.screens.AiSheet
 import com.tend.app.ui.screens.DetailScreen
 import com.tend.app.ui.screens.PlanScreen
@@ -58,6 +67,13 @@ import kotlin.math.abs
 fun TendApp(vm: MainViewModel = viewModel()) {
     val shell by vm.shell.collectAsStateWithLifecycle()
     val showAiBar by vm.showAiBar.collectAsStateWithLifecycle()
+
+    // Celebrations arrive as one-shot events and are hosted at the shell, above
+    // every tab, so the moment survives the user navigating away mid-animation.
+    var celebration by remember { mutableStateOf<Celebration?>(null) }
+    LaunchedEffect(Unit) {
+        vm.celebrations.collect { celebration = it }
+    }
 
     // Back closes overlays / detail screens before exiting the app.
     BackHandler(enabled = shell.aiOpen || shell.tab == Tab.Detail || shell.tab == Tab.Settings) {
@@ -126,6 +142,18 @@ fun TendApp(vm: MainViewModel = viewModel()) {
         if (shell.aiOpen) {
             AiSheet(vm)
         }
+
+        celebration?.let { moment ->
+            CelebrationOverlay(
+                headline = moment.headline,
+                detail = moment.detail,
+                style = when (moment.kind) {
+                    Celebration.Kind.DayComplete -> CelebrationStyle.Burst
+                    Celebration.Kind.StreakMilestone -> CelebrationStyle.Ring
+                },
+                onDismiss = { celebration = null },
+            )
+        }
     }
 }
 
@@ -136,7 +164,7 @@ private fun AiBar(onClick: () -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .background(Ink, RoundedCornerShape(99.dp))
-                .tapNoRipple(onClick)
+                .bouncyTap(pressedScale = TendMotion.PressScaleLarge, onClick = onClick)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -202,7 +230,9 @@ private fun NavItem(
 ) {
     val color = if (active) Ink else Faint
     Column(
-        modifier.tapNoRipple(onClick).padding(vertical = 6.dp),
+        modifier
+            .bouncyTap(haptic = TendHaptic.Select, pressedScale = TendMotion.PressScaleLarge, onClick = onClick)
+            .padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {

@@ -1,5 +1,7 @@
 package com.tend.app.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +41,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tend.app.data.SettingsRepository
 import com.tend.app.domain.Time
+import com.tend.app.ui.motion.LocalReduceMotion
+import com.tend.app.ui.motion.LocalTendHaptics
+import com.tend.app.ui.motion.TendHaptic
+import com.tend.app.ui.motion.TendMotion
+import com.tend.app.ui.motion.bouncyTap
+import com.tend.app.ui.motion.successPop
 import com.tend.app.ui.theme.Border
 import com.tend.app.ui.theme.Card
 import com.tend.app.ui.theme.CardBorder
@@ -51,14 +59,34 @@ import com.tend.app.ui.theme.RingTrack
 import com.tend.app.ui.theme.SegBg
 import com.tend.app.ui.theme.SpaceGrotesk
 
-/** Clickable without the Material ripple, to match the flat prototype look. */
-fun Modifier.tapNoRipple(onClick: () -> Unit): Modifier = composed {
+/**
+ * Clickable without the Material ripple, to match the flat prototype look.
+ *
+ * The ripple is gone but the tap still needs to acknowledge itself, so every
+ * tap in the app carries a light haptic. This is the single tap path the whole
+ * product goes through, which is what makes that one line worth having here
+ * rather than repeated at seventy call sites.
+ *
+ * Pass [TendHaptic.None] for taps that only scroll or navigate, and use
+ * [com.tend.app.ui.motion.bouncyTap] instead when the target is a control that
+ * should also move under the finger.
+ */
+fun Modifier.tapNoRipple(
+    haptic: TendHaptic,
+    onClick: () -> Unit,
+): Modifier = composed {
+    val haptics = LocalTendHaptics.current
     clickable(
         interactionSource = remember { MutableInteractionSource() },
         indication = null,
-        onClick = onClick,
-    )
+    ) {
+        haptics.perform(haptic)
+        onClick()
+    }
 }
+
+/** Overload keeping `tapNoRipple(onClick)` and `tapNoRipple { … }` call sites working. */
+fun Modifier.tapNoRipple(onClick: () -> Unit): Modifier = tapNoRipple(TendHaptic.Tap, onClick)
 
 /** Standard cream card: #FFFDF7 with a 1px #E8E2D3 border. */
 @Composable
@@ -99,7 +127,14 @@ fun ScreenTitle(text: String) {
     )
 }
 
-/** Circular progress ring with a small label in the middle (week strip). */
+/**
+ * Circular progress ring with a small label in the middle (week strip).
+ *
+ * The sweep animates toward its target instead of snapping. Checking a habit
+ * off then reads as the ring *filling* — the arc travels the distance you just
+ * earned — which is the difference between seeing a number change and feeling
+ * progress happen.
+ */
 @Composable
 fun ProgressRing(
     progress: Float,
@@ -110,6 +145,12 @@ fun ProgressRing(
     stroke: Dp = 3.5.dp,
     track: Color = RingTrack,
 ) {
+    val reduceMotion = LocalReduceMotion.current
+    val animated by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = if (reduceMotion) snap<Float>() else TendMotion.Progress,
+        label = "ringProgress",
+    )
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(Modifier.size(size)) {
             val strokePx = stroke.toPx()
@@ -125,11 +166,11 @@ fun ProgressRing(
                 size = arcSize,
                 style = Stroke(width = strokePx),
             )
-            if (progress > 0f && ringColor != Color.Transparent) {
+            if (animated > 0f && ringColor != Color.Transparent) {
                 drawArc(
                     color = ringColor,
                     startAngle = -90f,
-                    sweepAngle = 360f * progress.coerceIn(0f, 1f),
+                    sweepAngle = 360f * animated,
                     useCenter = false,
                     topLeft = topLeft,
                     size = arcSize,
@@ -192,7 +233,11 @@ fun Heatmap(
 /** Dashed "+ Add …" affordance used at the bottom of list screens. */
 @Composable
 fun DashedAddBox(label: String, onClick: () -> Unit) {
-    Box(Modifier.fillMaxWidth().tapNoRipple(onClick)) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .bouncyTap(pressedScale = TendMotion.PressScaleLarge, onClick = onClick)
+    ) {
         Canvas(Modifier.matchParentSize()) {
             drawRoundRect(
                 color = Dashed,
@@ -240,14 +285,14 @@ fun DialogInput(value: String, onChange: (String) -> Unit, placeholder: String) 
     }
 }
 
-/** Square −/+ stepper button. */
+/** Square −/+ stepper button. Ticks like a dial, since it's held down and repeated. */
 @Composable
 fun Stepper(glyph: String, onClick: () -> Unit) {
     Box(
         Modifier
             .size(30.dp)
             .background(SegBg, RoundedCornerShape(10.dp))
-            .tapNoRipple(onClick),
+            .bouncyTap(haptic = TendHaptic.Select, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(glyph, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink)
@@ -291,7 +336,7 @@ fun CategoryPicker(
                     Modifier
                         .background(if (isSelected) Ink else Color.Transparent, RoundedCornerShape(99.dp))
                         .border(1.dp, if (isSelected) Ink else Border, RoundedCornerShape(99.dp))
-                        .tapNoRipple { onSelect(cat) }
+                        .bouncyTap(haptic = TendHaptic.Select) { onSelect(cat) }
                         .padding(horizontal = 11.dp, vertical = 7.dp)
                 ) {
                     Text(
@@ -335,7 +380,13 @@ fun CategoryPicker(
     }
 }
 
-/** Round check button used on plan rows and task rows. */
+/**
+ * Round check button used on plan rows and task rows.
+ *
+ * Shared by Tasks and Plan, so the completion feel is identical wherever a
+ * thing gets ticked off: press-squash under the finger, a pop when it lands,
+ * and a directional toggle haptic that distinguishes checking from unchecking.
+ */
 @Composable
 fun CheckCircle(
     done: Boolean,
@@ -348,11 +399,15 @@ fun CheckCircle(
     Box(
         Modifier
             .size(size)
+            .successPop(done)
             .then(
                 if (done) Modifier.background(accent, RoundedCornerShape(50))
                 else Modifier.border(1.5.dp, borderColor, RoundedCornerShape(50))
             )
-            .tapNoRipple(onClick),
+            .bouncyTap(
+                haptic = if (done) TendHaptic.ToggleOff else TendHaptic.Confirm,
+                onClick = onClick,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Text(
