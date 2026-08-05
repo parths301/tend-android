@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11 and below (android:fullBackupContent).
+
+  The encrypted BYOK prefs are excluded on purpose: their master key lives in
+  this device's keystore and cannot leave it, so a restored copy would be
+  undecryptable ciphertext that crashes on first read. The user re-pastes the
+  key instead — that's a five-second cost versus a broken install.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="tend_secure.xml" />
+</full-backup-content>

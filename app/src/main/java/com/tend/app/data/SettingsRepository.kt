@@ -4,15 +4,18 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.tend.app.data.backup.BackupSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.settingsStore by preferencesDataStore(name = "settings")
@@ -29,6 +32,15 @@ class SettingsRepository(context: Context) {
     private val checkinEnabledKey = booleanPreferencesKey("checkin_enabled")
     private val checkinMinKey = intPreferencesKey("checkin_min")
     private val calendarEnabledKey = booleanPreferencesKey("calendar_enabled")
+
+    // Backup
+    private val backupFolderKey = stringPreferencesKey("backup_folder_uri")
+    private val backupIntervalKey = stringPreferencesKey("backup_interval")
+    private val backupMinKey = intPreferencesKey("backup_min")
+    private val backupKeepKey = intPreferencesKey("backup_keep")
+    private val backupLastAtKey = longPreferencesKey("backup_last_at")
+    private val backupLastFileKey = stringPreferencesKey("backup_last_file")
+    private val backupLastErrorKey = stringPreferencesKey("backup_last_error")
 
     private fun modelKey(provider: String) = stringPreferencesKey("model_$provider")
 
@@ -89,6 +101,73 @@ class SettingsRepository(context: Context) {
         store.edit { it[calendarEnabledKey] = enabled }
     }
 
+    // ── backup ──────────────────────────────────────────────────
+
+    /** Persisted SAF tree URI of the folder backups are written to; empty = not chosen yet. */
+    val backupFolder: Flow<String> = store.data.map { it[backupFolderKey] ?: "" }
+    val backupInterval: Flow<String> = store.data.map { it[backupIntervalKey] ?: BACKUP_OFF }
+    val backupMin: Flow<Int> = store.data.map { it[backupMinKey] ?: DEFAULT_BACKUP_MIN }
+    val backupKeep: Flow<Int> = store.data.map { it[backupKeepKey] ?: DEFAULT_BACKUP_KEEP }
+    val backupLastAt: Flow<Long> = store.data.map { it[backupLastAtKey] ?: 0L }
+    val backupLastFile: Flow<String> = store.data.map { it[backupLastFileKey] ?: "" }
+    val backupLastError: Flow<String> = store.data.map { it[backupLastErrorKey] ?: "" }
+
+    suspend fun setBackupFolder(uri: String) {
+        store.edit { it[backupFolderKey] = uri }
+    }
+
+    suspend fun setBackupInterval(interval: String) {
+        store.edit { it[backupIntervalKey] = interval }
+    }
+
+    suspend fun setBackupMin(min: Int) {
+        store.edit { it[backupMinKey] = min.coerceIn(0, 24 * 60 - 1) }
+    }
+
+    suspend fun setBackupKeep(keep: Int) {
+        store.edit { it[backupKeepKey] = keep.coerceIn(1, 60) }
+    }
+
+    suspend fun recordBackupResult(atMillis: Long, fileName: String, error: String) {
+        store.edit {
+            it[backupLastAtKey] = atMillis
+            it[backupLastFileKey] = fileName
+            it[backupLastErrorKey] = error
+        }
+    }
+
+    /** Everything a backup carries, minus the API keys. */
+    suspend fun snapshot(): BackupSettings = BackupSettings(
+        heatmapWeeks = heatmapWeeks.first(),
+        showAiBar = showAiBar.first(),
+        provider = provider.first(),
+        model = model.first(),
+        customCategories = customCategories.first(),
+        notificationsEnabled = notificationsEnabled.first(),
+        checkinEnabled = checkinEnabled.first(),
+        checkinMin = checkinMin.first(),
+        calendarEnabled = calendarEnabled.first(),
+    )
+
+    /**
+     * Restores a backed-up settings block. Backup destination and schedule are
+     * deliberately left alone — those describe *this* device, not the one the
+     * backup came from.
+     */
+    suspend fun applySnapshot(s: BackupSettings) {
+        store.edit { prefs ->
+            prefs[heatmapWeeksKey] = s.heatmapWeeks.coerceIn(8, 17)
+            prefs[showAiBarKey] = s.showAiBar
+            prefs[providerKey] = s.provider
+            prefs[customCategoriesKey] = s.customCategories.toSet()
+            prefs[notificationsEnabledKey] = s.notificationsEnabled
+            prefs[checkinEnabledKey] = s.checkinEnabled
+            prefs[checkinMinKey] = s.checkinMin.coerceIn(0, 24 * 60 - 1)
+            prefs[calendarEnabledKey] = s.calendarEnabled
+            if (s.model.isNotBlank()) prefs[modelKey(s.provider)] = s.model
+        }
+    }
+
     // BYOK API keys live in EncryptedSharedPreferences, never in plain storage.
     // One key per provider, so switching providers doesn't lose the other key.
     private val securePrefs = EncryptedSharedPreferences.create(
@@ -117,6 +196,18 @@ class SettingsRepository(context: Context) {
         const val PROVIDER_GEMINI = "gemini"
         const val DEFAULT_CHECKIN_MIN = 21 * 60 + 30 // 9:30 PM nightly check-in
         val PRESET_CATEGORIES = listOf("Fitness", "Mind", "Work", "Health")
+
+        const val BACKUP_OFF = "off"
+        const val BACKUP_DAILY = "daily"
+        const val BACKUP_WEEKLY = "weekly"
+        const val DEFAULT_BACKUP_MIN = 2 * 60 // 2:00 AM, when the phone is idle
+        const val DEFAULT_BACKUP_KEEP = 7
+
+        fun intervalLabel(interval: String): String = when (interval) {
+            BACKUP_DAILY -> "Daily"
+            BACKUP_WEEKLY -> "Weekly"
+            else -> "Off"
+        }
 
         fun defaultModel(provider: String): String = when (provider) {
             PROVIDER_GEMINI -> "gemini-2.5-flash"

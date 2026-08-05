@@ -89,6 +89,9 @@ interface PlanDao {
     @Query("SELECT * FROM plan_blocks WHERE epochDay = :epochDay ORDER BY startMin")
     suspend fun forDayOnce(epochDay: Long): List<PlanBlock>
 
+    @Query("SELECT * FROM plan_blocks ORDER BY epochDay, startMin")
+    suspend fun allOnce(): List<PlanBlock>
+
     @Update
     suspend fun update(block: PlanBlock)
 
@@ -115,6 +118,9 @@ interface PlanDao {
 interface NoteDao {
     @Query("SELECT * FROM notes WHERE habitId = :habitId ORDER BY timestamp DESC")
     fun forHabit(habitId: Long): Flow<List<NoteEntry>>
+
+    @Query("SELECT * FROM notes ORDER BY timestamp")
+    suspend fun allOnce(): List<NoteEntry>
 
     @Insert
     suspend fun insert(note: NoteEntry): Long

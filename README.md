@@ -16,7 +16,7 @@ and [`chats/chat1.md`](chats/chat1.md)).
 | **Widgets** | Dark home-screen widget mockups: streak, quick-check, heatmap, Deep Work bars |
 | **Habit detail** | Month calendar (with month paging), streak/best/rate tiles, notes with add-note input |
 | **Ask Tend** | Bottom-sheet AI chat on every main tab — type "add buy groceries at 5pm" and it lands in your plan; suggestion chips for planning and weekly summary |
-| **Settings** | BYOK Anthropic API key (encrypted on-device), model picker, heatmap width, AI bar toggle — reachable via the ⚙ in the Ask Tend sheet |
+| **Settings** | BYOK Anthropic API key (encrypted on-device), model picker, heatmap width, AI bar toggle, backup & restore — reachable via the ⚙ in the Ask Tend sheet |
 
 **Swipe left/right** anywhere on the four main tabs to switch between them.
 
@@ -34,6 +34,28 @@ and [`chats/chat1.md`](chats/chat1.md)).
   structured JSON action (`add_task` / `add_plan` / `add_habit`) that the app applies. Default
   model: `claude-opus-4-8`. Network failures fall back to the offline parser.
 
+## Backup & restore
+
+Settings → **Backup & restore** writes everything (habits, check-ins, tasks,
+plans, notes, settings) as a single self-describing JSON file into a folder you
+pick once with the system file picker:
+
+```
+tend-backup-2026-08-05-0200.json
+```
+
+- **Scheduled** — Off / Daily / Weekly at a time you choose, run by WorkManager,
+  keeping the newest N files and pruning the rest.
+- **On demand** — "Back up now", "Save a copy…" anywhere, or "Share…".
+- **Restore** — pick a file, review its contents, confirm. Replaces everything in
+  one transaction; orphaned or duplicate rows are dropped rather than corrupting
+  the database.
+- **API keys are never written to the file** — they stay in the device keystore,
+  and they're excluded from Android's cloud backup too.
+
+Format details live in `data/backup/BackupFormat.kt`; `version` gates forward
+compatibility, so a file from a newer build is refused rather than half-read.
+
 ## Building
 
 Requires JDK 17+ and the Android SDK (compileSdk 35). Then:
@@ -44,5 +66,11 @@ Requires JDK 17+ and the Android SDK (compileSdk 35). Then:
 
 APK lands in `app/build/outputs/apk/debug/`. Min SDK 26 (Android 8.0), target SDK 35.
 
-> CI: `.github/workflows/android.yml` builds the debug APK on every push and uploads it
-> as a workflow artifact.
+For a publishable build, copy `keystore.properties.example` → `keystore.properties`
+and fill in your upload key; without it the release variant falls back to the
+debug key so `assembleRelease` still runs locally and in CI.
+
+> CI: `.github/workflows/android.yml` runs unit tests and lint, then builds the
+> debug and release APKs on every push, uploading the debug APK as an artifact.
+
+Everything between here and a Play Store listing is tracked in [`LAUNCH.md`](LAUNCH.md).

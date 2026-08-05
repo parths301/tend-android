@@ -1,9 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+// Upload-key credentials live in keystore.properties, which is git-ignored.
+// Without it — CI, a fresh clone — the release build falls back to the debug
+// key so `assembleRelease` still runs; that APK just can't be published.
+val keystoreProps = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val hasReleaseKeystore = keystoreProps.getProperty("storeFile") != null
 
 android {
     namespace = "com.tend.app"
@@ -13,12 +24,30 @@ android {
         applicationId = "com.tend.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "2.0.2"
+        versionCode = 6
+        versionName = "2.1.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig =
+                if (hasReleaseKeystore) signingConfigs.getByName("release")
+                else signingConfigs.getByName("debug")
+            // R8 stays off for the first release: the Anthropic SDK resolves
+            // its request/response models reflectively, and a shrunk build of
+            // it can't be verified from CI alone. proguard-rules.pro already
+            // carries the keeps for when this flips on.
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -34,6 +63,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true // backups stamp the writing app's version into the file
     }
     packaging {
         resources {
@@ -73,6 +103,10 @@ dependencies {
     // Settings + encrypted BYOK key storage
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Backups: SAF folder access + scheduled background writes
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // Anthropic SDK for the BYOK "Ask Tend" integration
     implementation("com.anthropic:anthropic-java:2.34.0")

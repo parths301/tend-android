@@ -1,6 +1,8 @@
 package com.tend.app
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tend.app.ai.AiAction
@@ -10,6 +12,11 @@ import com.tend.app.data.CalEvent
 import com.tend.app.data.CalendarRepository
 import com.tend.app.data.SettingsRepository
 import com.tend.app.data.TendRepository
+import com.tend.app.data.backup.BackupFormat
+import com.tend.app.data.backup.BackupManager
+import com.tend.app.data.backup.BackupScheduler
+import com.tend.app.data.backup.BackupSnapshot
+import com.tend.app.data.backup.readableMessage
 import com.tend.app.data.db.AppDatabase
 import com.tend.app.data.db.Habit
 import com.tend.app.data.db.HabitLog
@@ -61,6 +68,22 @@ data class ModelsUi(
     val loading: Boolean = false,
     val models: List<String> = emptyList(),
     val error: String? = null,
+)
+
+/** Outcome of the most recent backup attempt, scheduled or manual. */
+data class BackupStatus(
+    val atMillis: Long = 0L,
+    val fileName: String = "",
+    val error: String = "",
+) {
+    val ran: Boolean get() = atMillis > 0L
+    val failed: Boolean get() = error.isNotEmpty()
+}
+
+/** A backup file the user picked, held for confirmation before it overwrites anything. */
+data class PendingRestore(
+    val snapshot: BackupSnapshot,
+    val warnings: List<String>,
 )
 
 data class Shell(
@@ -159,6 +182,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val calendarEnabled: StateFlow<Boolean> =
         settings.calendarEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    // ── backup ──────────────────────────────────────────────────
+    val backupFolder: StateFlow<String> =
+        settings.backupFolder.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val backupFolderLabel: StateFlow<String> =
+        settings.backupFolder.map { BackupManager.folderLabel(it) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val backupInterval: StateFlow<String> =
+        settings.backupInterval.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsRepository.BACKUP_OFF)
+    val backupMin: StateFlow<Int> =
+        settings.backupMin.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsRepository.DEFAULT_BACKUP_MIN)
+    val backupKeep: StateFlow<Int> =
+        settings.backupKeep.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsRepository.DEFAULT_BACKUP_KEEP)
+    val backupStatus: StateFlow<BackupStatus> =
+        combine(
+            settings.backupLastAt,
+            settings.backupLastFile,
+            settings.backupLastError,
+        ) { at, file, error -> BackupStatus(at, file, error) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, BackupStatus())
+
+    private val backupBusyState = MutableStateFlow(false)
+    val backupBusy: StateFlow<Boolean> = backupBusyState.asStateFlow()
+    private val backupMessageState = MutableStateFlow<String?>(null)
+    val backupMessage: StateFlow<String?> = backupMessageState.asStateFlow()
+    private val pendingRestoreState = MutableStateFlow<PendingRestore?>(null)
+    val pendingRestore: StateFlow<PendingRestore?> = pendingRestoreState.asStateFlow()
+
     /** API key for the currently selected provider. */
     val apiKey: StateFlow<String> =
         combine(settings.provider, settings.apiKeys) { p, keys -> keys[p].orEmpty() }
@@ -180,6 +230,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             repo.materializeHabitBlocks(today)
             TendWidgets.refresh(getApplication())
             ReminderScheduler.reschedule(getApplication())
+            // Re-arms scheduled backups if the OS ever dropped the work.
+            BackupScheduler.sync(getApplication())
         }
         viewModelScope.launch {
             // Once a key is present, load the model list so a saved model that has
@@ -391,6 +443,124 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setCalendarEnabled(enabled: Boolean) = viewModelScope.launch {
         settings.setCalendarEnabled(enabled)
+    }
+
+    // ── backup & restore ────────────────────────────────────────
+
+    fun clearBackupMessage() {
+        backupMessageState.value = null
+    }
+
+    /** Stores the folder the user picked and holds on to write access across reboots. */
+    fun setBackupFolder(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                getApplication<Application>().contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            } catch (e: SecurityException) {
+                backupMessageState.value = "Couldn't keep access to that folder — try another one."
+                return@launch
+            }
+            settings.setBackupFolder(uri.toString())
+            BackupScheduler.sync(getApplication())
+            backupMessageState.value = "Backup folder set to ${BackupManager.folderLabel(uri.toString())}."
+        }
+    }
+
+    fun setBackupInterval(interval: String) = viewModelScope.launch {
+        settings.setBackupInterval(interval)
+        BackupScheduler.sync(getApplication())
+    }
+
+    fun setBackupMin(min: Int) = viewModelScope.launch {
+        settings.setBackupMin(min)
+        BackupScheduler.sync(getApplication())
+    }
+
+    fun setBackupKeep(keep: Int) = viewModelScope.launch { settings.setBackupKeep(keep) }
+
+    fun backupNow() {
+        if (backupBusyState.value) return
+        backupBusyState.value = true
+        viewModelScope.launch {
+            try {
+                val result = BackupManager.backupNow(getApplication())
+                backupMessageState.value =
+                    "Backed up ${result.rows} entries to ${result.fileName}."
+            } catch (e: Exception) {
+                backupMessageState.value = e.readableMessage()
+            } finally {
+                backupBusyState.value = false
+            }
+        }
+    }
+
+    /** One-off "save a copy" to a location picked in the system dialog. */
+    fun exportTo(uri: Uri) {
+        if (backupBusyState.value) return
+        backupBusyState.value = true
+        viewModelScope.launch {
+            try {
+                val result = BackupManager.exportTo(getApplication(), uri)
+                backupMessageState.value = "Saved ${result.rows} entries to ${result.fileName}."
+            } catch (e: Exception) {
+                backupMessageState.value = e.readableMessage()
+            } finally {
+                backupBusyState.value = false
+            }
+        }
+    }
+
+    /** Reads a picked file and parks it for confirmation — nothing is replaced yet. */
+    fun previewRestore(uri: Uri) {
+        if (backupBusyState.value) return
+        backupBusyState.value = true
+        viewModelScope.launch {
+            try {
+                val snapshot = BackupManager.read(getApplication(), uri)
+                pendingRestoreState.value = PendingRestore(snapshot, BackupFormat.problems(snapshot))
+            } catch (e: Exception) {
+                backupMessageState.value = e.readableMessage()
+            } finally {
+                backupBusyState.value = false
+            }
+        }
+    }
+
+    fun cancelRestore() {
+        pendingRestoreState.value = null
+    }
+
+    fun confirmRestore() {
+        val pending = pendingRestoreState.value ?: return
+        pendingRestoreState.value = null
+        backupBusyState.value = true
+        viewModelScope.launch {
+            try {
+                BackupManager.restore(getApplication(), pending.snapshot)
+                repo.materializeHabitBlocks(today)
+                shellState.update { it.copy(tab = Tab.Today, detailHabitId = 1L) }
+                chatState.value = emptyList()
+                backupMessageState.value = "Restored ${pending.snapshot.rowCount} entries."
+            } catch (e: Exception) {
+                backupMessageState.value = "Restore failed: ${e.readableMessage()}"
+            } finally {
+                backupBusyState.value = false
+            }
+        }
+    }
+
+    /** Builds a backup file in cache and hands it to the system share sheet. */
+    fun shareBackup(onIntent: (Intent) -> Unit) {
+        viewModelScope.launch {
+            try {
+                onIntent(BackupManager.shareIntent(getApplication()))
+            } catch (e: Exception) {
+                backupMessageState.value = e.readableMessage()
+            }
+        }
     }
 
     fun refreshCalendar() {

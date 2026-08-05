@@ -52,16 +52,22 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tend.app.MainViewModel
+import com.tend.app.PendingRestore
 import com.tend.app.Tab
 import com.tend.app.data.SettingsRepository
+import com.tend.app.data.backup.BackupFormat
+import com.tend.app.data.backup.BackupManager
+import com.tend.app.domain.Time
 import com.tend.app.ui.components.Kicker
 import com.tend.app.ui.components.ScreenTitle
+import com.tend.app.ui.components.Stepper
 import com.tend.app.ui.components.TendCard
 import com.tend.app.ui.components.TimeStepperRow
 import com.tend.app.ui.components.tapNoRipple
@@ -437,6 +443,10 @@ fun SettingsScreen(vm: MainViewModel) {
             }
         }
 
+        // ── Backup & restore ────────────────────────────
+        SectionLabel("BACKUP & RESTORE")
+        BackupCard(vm)
+
         // ── Appearance ──────────────────────────────────
         SectionLabel("APPEARANCE")
         TendCard(Modifier.fillMaxWidth()) {
@@ -495,6 +505,257 @@ fun SettingsScreen(vm: MainViewModel) {
                 )
             }
         }
+    }
+}
+
+/**
+ * Backups write a plain-JSON file into a folder the user picks once, and can
+ * repeat on a schedule. Everything here is on-device: no account, no upload.
+ */
+@Composable
+private fun BackupCard(vm: MainViewModel) {
+    val folder by vm.backupFolder.collectAsStateWithLifecycle()
+    val folderLabel by vm.backupFolderLabel.collectAsStateWithLifecycle()
+    val interval by vm.backupInterval.collectAsStateWithLifecycle()
+    val backupMin by vm.backupMin.collectAsStateWithLifecycle()
+    val keep by vm.backupKeep.collectAsStateWithLifecycle()
+    val status by vm.backupStatus.collectAsStateWithLifecycle()
+    val busy by vm.backupBusy.collectAsStateWithLifecycle()
+    val message by vm.backupMessage.collectAsStateWithLifecycle()
+    val pendingRestore by vm.pendingRestore.collectAsStateWithLifecycle()
+
+    val context = LocalContext.current
+    val hasFolder = folder.isNotBlank()
+    val scheduled = interval != SettingsRepository.BACKUP_OFF
+
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri -> uri?.let { vm.setBackupFolder(it) } }
+
+    val saveCopyPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(BackupFormat.MIME)
+    ) { uri -> uri?.let { vm.exportTo(it) } }
+
+    // Deliberately unfiltered: providers report .json files under half a dozen
+    // MIME types, and the file is validated on read anyway.
+    val restorePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { vm.previewRestore(it) } }
+
+    TendCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(
+                "Save everything — habits, check-ins, tasks, plans and notes — as a JSON " +
+                    "file on this device. It stays readable in any text editor, and restores " +
+                    "straight back into Tend. API keys are never written to the file.",
+                fontSize = 12.5.sp, color = Muted, lineHeight = 18.sp,
+            )
+
+            FieldLabel("Backup folder")
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (hasFolder) folderLabel else "Not chosen yet",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (hasFolder) Ink else Faint,
+                    modifier = Modifier.weight(1f).padding(end = 10.dp),
+                )
+                OutlinePill(if (hasFolder) "Change" else "Choose folder") { folderPicker.launch(null) }
+            }
+
+            HorizontalDivider(color = RowDivider, thickness = 1.dp)
+
+            FieldLabel("Automatic backup")
+            Row(Modifier.background(SegBg, RoundedCornerShape(12.dp)).padding(3.dp)) {
+                listOf(
+                    SettingsRepository.BACKUP_OFF,
+                    SettingsRepository.BACKUP_DAILY,
+                    SettingsRepository.BACKUP_WEEKLY,
+                ).forEach { option ->
+                    ProviderButton(
+                        Modifier.weight(1f),
+                        SettingsRepository.intervalLabel(option),
+                        interval == option,
+                    ) { vm.setBackupInterval(option) }
+                }
+            }
+
+            if (scheduled) {
+                if (!hasFolder) {
+                    Text(
+                        "Pick a folder above — scheduled backups have nowhere to write until you do.",
+                        fontSize = 11.5.sp, color = Terracotta, lineHeight = 16.sp,
+                    )
+                }
+                TimeStepperRow(backupMin, { vm.setBackupMin(it) }, hint = "runs around this time")
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Keep", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Older backups in the folder are deleted", fontSize = 11.5.sp, color = Faint)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Stepper("−") { vm.setBackupKeep(keep - 1) }
+                        Text(
+                            "$keep", fontFamily = SpaceGrotesk, fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Stepper("+") { vm.setBackupKeep(keep + 1) }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = RowDivider, thickness = 1.dp)
+
+            when {
+                status.failed -> Text(
+                    "Last backup failed (${Time.stamp(status.atMillis)}): ${status.error}",
+                    fontSize = 11.5.sp, color = Terracotta, lineHeight = 16.sp,
+                )
+                status.ran -> Text(
+                    "✓ Last backup ${Time.stamp(status.atMillis)} · ${status.fileName}",
+                    fontSize = 11.5.sp, color = Teal, lineHeight = 16.sp,
+                )
+                else -> Text("No backup yet.", fontSize = 11.5.sp, color = Faint)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    Modifier
+                        .background(if (hasFolder && !busy) Ink else Faint, RoundedCornerShape(99.dp))
+                        .tapNoRipple { if (hasFolder && !busy) vm.backupNow() }
+                        .padding(horizontal = 16.dp, vertical = 9.dp)
+                ) {
+                    Text(
+                        if (busy) "Working…" else "Back up now",
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Cream,
+                    )
+                }
+                OutlinePill("Save a copy…") {
+                    if (!busy) saveCopyPicker.launch(BackupManager.fileNameFor(System.currentTimeMillis()))
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinePill("Share…") {
+                    vm.shareBackup { intent ->
+                        context.startActivity(Intent.createChooser(intent, "Share your Tend backup"))
+                    }
+                }
+                OutlinePill("Restore…") { if (!busy) restorePicker.launch(arrayOf("*/*")) }
+            }
+
+            message?.let {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(it, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.weight(1f))
+                    Text(
+                        "✕", fontSize = 12.sp, color = Faint,
+                        modifier = Modifier.tapNoRipple { vm.clearBackupMessage() },
+                    )
+                }
+            }
+        }
+    }
+
+    pendingRestore?.let { pending ->
+        RestoreConfirmDialog(
+            pending = pending,
+            onConfirm = { vm.confirmRestore() },
+            onDismiss = { vm.cancelRestore() },
+        )
+    }
+}
+
+@Composable
+private fun RestoreConfirmDialog(
+    pending: PendingRestore,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val s = pending.snapshot
+    Dialog(onDismissRequest = onDismiss) {
+        TendCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Restore this backup?", fontFamily = SpaceGrotesk, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+
+                Text(
+                    if (s.createdAtMillis > 0) "Written ${Time.stamp(s.createdAtMillis)} by Tend ${s.appVersion}"
+                    else "Tend ${s.appVersion}",
+                    fontSize = 12.sp, color = Muted,
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    RestoreCountRow("Habits", s.habits.size)
+                    RestoreCountRow("Check-ins", s.logs.size)
+                    RestoreCountRow("Tasks", s.tasks.size)
+                    RestoreCountRow("Plan blocks", s.plans.size)
+                    RestoreCountRow("Notes", s.notes.size)
+                }
+
+                Text(
+                    "This replaces everything currently in Tend on this device. " +
+                        "It can't be undone — back up first if you're not sure.",
+                    fontSize = 12.sp, color = Terracotta, lineHeight = 17.sp,
+                )
+
+                if (pending.warnings.isNotEmpty()) {
+                    Text(
+                        "Some rows will be skipped: ${pending.warnings.joinToString("; ")}.",
+                        fontSize = 11.5.sp, color = Muted, lineHeight = 16.sp,
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        Modifier
+                            .background(Ink, RoundedCornerShape(99.dp))
+                            .tapNoRipple(onConfirm)
+                            .padding(horizontal = 16.dp, vertical = 9.dp)
+                    ) {
+                        Text("Replace my data", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Cream)
+                    }
+                    OutlinePill("Cancel", onDismiss)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RestoreCountRow(label: String, count: Int) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, fontSize = 12.5.sp, color = Muted)
+        Text(
+            "$count", fontFamily = SpaceGrotesk, fontSize = 12.5.sp,
+            fontWeight = FontWeight.Bold, color = Ink,
+        )
+    }
+}
+
+/** Bordered secondary action pill. */
+@Composable
+private fun OutlinePill(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .border(1.dp, Border, RoundedCornerShape(99.dp))
+            .tapNoRipple(onClick)
+            .padding(horizontal = 16.dp, vertical = 9.dp)
+    ) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
     }
 }
 

@@ -1,6 +1,8 @@
 package com.tend.app.domain
 
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -8,6 +10,11 @@ object Time {
     private val kickerFmt = DateTimeFormatter.ofPattern("EEEE · MMM d", Locale.ENGLISH)
     private val dayFmt = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
     private val monthFmt = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH)
+    private val stampFmt = DateTimeFormatter.ofPattern("MMM d, h:mm a", Locale.ENGLISH)
+
+    /** Epoch millis -> "Aug 5, 2:00 AM" */
+    fun stamp(millis: Long): String =
+        Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(stampFmt)
 
     fun kicker(date: LocalDate): String = date.format(kickerFmt).uppercase(Locale.ENGLISH)
     fun shortDay(date: LocalDate): String = date.format(dayFmt)

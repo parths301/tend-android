@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (android:dataExtractionRules). Same reasoning as backup_rules.xml:
+  keystore-backed ciphertext can't survive either a cloud backup or a
+  device-to-device transfer, so it is left out of both.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="tend_secure.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="tend_secure.xml" />
+    </device-transfer>
+</data-extraction-rules>

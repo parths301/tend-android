@@ -28,3 +28,8 @@ app/intermediates/
 # Build outputs
 *.jar
 *.zip
+
+# Signing — never commit the upload key or its passwords
+keystore.properties
+*.jks
+*.keystore
