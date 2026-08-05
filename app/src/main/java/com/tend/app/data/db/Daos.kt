@@ -253,6 +253,37 @@ interface ChatDao {
 }
 
 @Dao
+interface MemoryDao {
+    /**
+     * Newest first. Returns ciphertext — decryption happens above this layer,
+     * only when the vault is unlocked, and never inside a SQL query.
+     */
+    @Query("SELECT * FROM memory_entries ORDER BY createdAt DESC")
+    fun entries(): Flow<List<MemoryEntry>>
+
+    @Query("SELECT * FROM memory_entries ORDER BY createdAt DESC")
+    suspend fun entriesOnce(): List<MemoryEntry>
+
+    @Query("SELECT * FROM memory_entries WHERE id = :id LIMIT 1")
+    suspend fun entryById(id: Long): MemoryEntry?
+
+    @Query("SELECT COUNT(*) FROM memory_entries")
+    fun count(): Flow<Int>
+
+    @Insert
+    suspend fun insert(entry: MemoryEntry): Long
+
+    @Update
+    suspend fun update(entry: MemoryEntry)
+
+    @Query("DELETE FROM memory_entries WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM memory_entries")
+    suspend fun clear()
+}
+
+@Dao
 interface NoteDao {
     @Query("SELECT * FROM notes WHERE habitId = :habitId ORDER BY timestamp DESC")
     fun forHabit(habitId: Long): Flow<List<NoteEntry>>

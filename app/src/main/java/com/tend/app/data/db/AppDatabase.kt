@@ -12,8 +12,9 @@ import java.time.LocalDate
     entities = [
         Habit::class, HabitLog::class, TaskItem::class, PlanBlock::class, NoteEntry::class,
         ChatThread::class, ChatMessage::class, MessageLink::class, Attachment::class,
+        MemoryEntry::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -22,6 +23,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun planDao(): PlanDao
     abstract fun noteDao(): NoteDao
     abstract fun chatDao(): ChatDao
+    abstract fun memoryDao(): MemoryDao
 
     companion object {
         @Volatile
@@ -89,10 +91,36 @@ abstract class AppDatabase : RoomDatabase() {
                 "ON `attachments` (`ownerType`, `ownerId`)",
         )
 
+        /**
+         * v3 → v4: the memory vault.
+         *
+         * Every user-supplied column is ciphertext; the readable ones are only
+         * what listing a locked vault needs.
+         */
+        val V4_TABLES = listOf(
+            "CREATE TABLE IF NOT EXISTS `memory_entries` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL, " +
+                "`kind` TEXT NOT NULL, " +
+                "`sizeBytes` INTEGER NOT NULL, " +
+                "`sealedTitle` TEXT NOT NULL, " +
+                "`sealedBody` TEXT NOT NULL, " +
+                "`sealedFileName` TEXT NOT NULL, " +
+                "`sealedOcrText` TEXT NOT NULL, " +
+                "`blobPath` TEXT NOT NULL, " +
+                "`mime` TEXT NOT NULL)",
+        )
+
         /** v2 → v3: persisted chat threads, messages, entity links and attachments. */
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 (V3_TABLES + V3_INDICES).forEach(db::execSQL)
+            }
+        }
+
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                V4_TABLES.forEach(db::execSQL)
             }
         }
 
@@ -118,7 +146,8 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "tend.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .build().also { instance = it }
             }
     }
 }

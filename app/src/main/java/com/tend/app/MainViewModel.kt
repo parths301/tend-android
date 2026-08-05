@@ -20,6 +20,11 @@ import com.tend.app.data.backup.BackupManager
 import com.tend.app.data.backup.BackupScheduler
 import com.tend.app.data.backup.BackupSnapshot
 import com.tend.app.data.backup.readableMessage
+import com.tend.app.data.vault.MemoryItem
+import com.tend.app.data.vault.MemoryRepository
+import com.tend.app.data.vault.UnlockResult
+import com.tend.app.data.vault.VaultSession
+import com.tend.app.data.vault.VaultState
 import com.tend.app.data.db.AppDatabase
 import com.tend.app.data.db.ChatMessage
 import com.tend.app.data.db.ChatThread
@@ -37,6 +42,7 @@ import com.tend.app.domain.chat.CloudAssistantEngine
 import com.tend.app.domain.chat.CloudCredentials
 import com.tend.app.domain.chat.EntityRef
 import com.tend.app.domain.chat.LocalAssistantEngine
+import com.tend.app.domain.chat.MemoryCommand
 import com.tend.app.domain.chat.ResponseSource
 import com.tend.app.notif.Notifications
 import com.tend.app.notif.ReminderScheduler
@@ -175,6 +181,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = TendRepository(AppDatabase.get(app))
     private val chatRepo = ChatRepository(AppDatabase.get(app))
+
+    // The vault is reachable from the ViewModel and from nowhere near the chat
+    // pipeline — see MemoryCommand for why that separation is structural.
+    val vaultSession = VaultSession(app)
+    private val memoryRepo = MemoryRepository(app, AppDatabase.get(app), vaultSession)
+
     val settings = SettingsRepository(app)
     private val calendar = CalendarRepository(app)
     private val ai = AiClient()
@@ -924,6 +936,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 chatRepo.saveDraft(threadId, "")
                 chatRepo.append(threadId, fromAi = false, text = input, source = ResponseSource.System)
 
+                // Vault commands are answered here and return. Nothing is built,
+                // no engine runs, and in AI mode nothing is sent — the text never
+                // enters the pipeline at all.
+                MemoryCommand.parse(input)?.let { command ->
+                    chatRepo.append(
+                        threadId = threadId,
+                        fromAi = true,
+                        text = runMemoryCommand(command),
+                        source = ResponseSource.System,
+                    )
+                    return@launch
+                }
+
                 val request = AiExecutionRouter.buildRequest(
                     threadId = threadId,
                     selectedMode = chatMode.value,
@@ -995,6 +1020,172 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val id = repo.addHabit(action.name, action.category, action.goal, createdDay = today)
             TendWidgets.refresh(getApplication())
             EntityRef(EntityRef.Type.Habit, id, action.name)
+        }
+    }
+
+    // ── memory vault ────────────────────────────────────────────
+
+    val vaultState: StateFlow<VaultState> =
+        vaultSession.state.stateIn(viewModelScope, SharingStarted.Eagerly, VaultState.NotSetUp)
+
+    val memoryCount: StateFlow<Int> =
+        memoryRepo.count().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    private val memoryResultsState = MutableStateFlow<List<MemoryItem>>(emptyList())
+    val memoryResults: StateFlow<List<MemoryItem>> = memoryResultsState.asStateFlow()
+
+    private val recoveryCodeState = MutableStateFlow<String?>(null)
+
+    /** Shown exactly once, at setup. Cleared as soon as the user dismisses it. */
+    val recoveryCode: StateFlow<String?> = recoveryCodeState.asStateFlow()
+
+    private val vaultErrorState = MutableStateFlow<String?>(null)
+    val vaultError: StateFlow<String?> = vaultErrorState.asStateFlow()
+
+    fun createVault(password: String) {
+        if (password.length < MIN_PASSWORD) {
+            vaultErrorState.value = "Use at least $MIN_PASSWORD characters."
+            return
+        }
+        viewModelScope.launch {
+            vaultErrorState.value = null
+            recoveryCodeState.value = withContext(Dispatchers.Default) {
+                vaultSession.setUp(password.toCharArray())
+            }
+            refreshMemory("")
+        }
+    }
+
+    fun dismissRecoveryCode() {
+        recoveryCodeState.value = null
+    }
+
+    fun unlockVault(password: String) {
+        viewModelScope.launch {
+            // PBKDF2 at 210k iterations is deliberately slow; keep it off the
+            // main thread or the unlock button freezes the UI for a third of a
+            // second on every attempt.
+            val result = withContext(Dispatchers.Default) {
+                vaultSession.unlock(password.toCharArray())
+            }
+            applyUnlock(result, "That password doesn't open this vault.")
+        }
+    }
+
+    fun unlockVaultWithRecoveryCode(code: String) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.Default) {
+                vaultSession.unlockWithRecoveryCode(code)
+            }
+            applyUnlock(result, "That recovery code doesn't match.")
+        }
+    }
+
+    private suspend fun applyUnlock(result: UnlockResult, failureMessage: String) {
+        when (result) {
+            UnlockResult.Success -> {
+                vaultErrorState.value = null
+                refreshMemory("")
+            }
+            UnlockResult.WrongSecret -> vaultErrorState.value = failureMessage
+            UnlockResult.NotSetUp -> vaultErrorState.value = "No vault has been created yet."
+        }
+    }
+
+    fun changeVaultPassword(current: String, next: String) {
+        if (next.length < MIN_PASSWORD) {
+            vaultErrorState.value = "Use at least $MIN_PASSWORD characters."
+            return
+        }
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.Default) {
+                vaultSession.changePassword(current.toCharArray(), next.toCharArray())
+            }
+            vaultErrorState.value = if (ok) null else "That current password isn't right."
+        }
+    }
+
+    fun lockVault() {
+        memoryResultsState.value = emptyList()
+        vaultSession.lock()
+    }
+
+    fun destroyVault() {
+        viewModelScope.launch {
+            memoryRepo.destroyEverything()
+            memoryResultsState.value = emptyList()
+            vaultErrorState.value = null
+        }
+    }
+
+    fun refreshMemory(query: String) {
+        viewModelScope.launch {
+            memoryResultsState.value = memoryRepo.search(query)
+        }
+    }
+
+    fun addMemoryNote(title: String, body: String) {
+        viewModelScope.launch {
+            memoryRepo.addText(title.ifBlank { body.take(40) }, body)
+            refreshMemory("")
+        }
+    }
+
+    fun addMemoryFile(uri: Uri, displayName: String, mime: String, caption: String) {
+        viewModelScope.launch {
+            memoryRepo.addFile(uri, displayName, mime, caption)
+            refreshMemory("")
+        }
+    }
+
+    fun deleteMemory(id: Long) {
+        viewModelScope.launch {
+            memoryRepo.delete(id)
+            refreshMemory("")
+        }
+    }
+
+    suspend fun memoryBlob(id: Long): ByteArray? = memoryRepo.readBlob(id)
+
+    /**
+     * Runs a vault command typed into the chat and returns the reply to show.
+     *
+     * The results are summarised rather than pasted into the conversation:
+     * chat messages are stored unencrypted, so spilling vault contents into a
+     * thread would quietly undo the encryption the user asked for.
+     */
+    private suspend fun runMemoryCommand(command: MemoryCommand): String {
+        if (vaultSession.state.value != VaultState.Unlocked) {
+            return if (vaultSession.isSetUp()) {
+                "Memory is locked. Open it from Settings → Memory to unlock, then try again."
+            } else {
+                "There's no Memory vault yet. Create one in Settings → Memory — it's encrypted and " +
+                    "kept out of everything the assistant sees."
+            }
+        }
+        return when (command) {
+            is MemoryCommand.Add -> {
+                if (command.text.isBlank()) {
+                    "Tell me what to remember, like \"add to memory: spare key is with Sam\"."
+                } else {
+                    memoryRepo.addText(command.text.take(60), command.text)
+                    refreshMemory("")
+                    "Saved to Memory, encrypted. It stays out of every AI request."
+                }
+            }
+
+            is MemoryCommand.Search -> {
+                val hits = memoryRepo.search(command.query)
+                memoryResultsState.value = hits
+                when {
+                    hits.isEmpty() && command.query.isBlank() -> "Memory is empty."
+                    hits.isEmpty() -> "Nothing in Memory matches \"${command.query}\"."
+                    else -> "${hits.size} match${if (hits.size == 1) "" else "es"} in Memory: " +
+                        hits.take(5).joinToString(", ") { it.title } +
+                        (if (hits.size > 5) ", …" else "") +
+                        ". Open Settings → Memory to view them."
+                }
+            }
         }
     }
 
@@ -1206,5 +1397,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
          * legible instead of the answer appearing before the question lands.
          */
         const val LOCAL_THINK_MS = 550L
+
+        /** Short enough not to be a nuisance, long enough to be worth PBKDF2. */
+        const val MIN_PASSWORD = 8
     }
 }

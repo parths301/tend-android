@@ -23,7 +23,7 @@ class RoomSchemaTest {
         // Read from disk rather than the test classpath: processTestResources can
         // run before KSP writes the schema, but test *execution* always follows
         // main compilation, so the file is reliably there by now.
-        val relative = "schemas/com.tend.app.data.db.AppDatabase/3.json"
+        val relative = "schemas/com.tend.app.data.db.AppDatabase/$SCHEMA_VERSION.json"
         val candidates = listOf(File(relative), File("app/$relative"))
         candidates.firstOrNull { it.isFile }?.readText()
             ?: error(
@@ -58,14 +58,14 @@ class RoomSchemaTest {
     @Test
     fun `exported schema is at the version the code declares`() {
         assertTrue(
-            "Exported schema is not version 3 — did the @Database version change without a migration?",
-            Regex(""""version"\s*:\s*3""").containsMatchIn(schemaJson),
+            "Exported schema is not version $SCHEMA_VERSION — did @Database change without a migration?",
+            Regex(""""version"\s*:\s*$SCHEMA_VERSION""").containsMatchIn(schemaJson),
         )
     }
 
     @Test
     fun `every migration CREATE TABLE matches the generated schema`() {
-        AppDatabase.V3_TABLES.forEach { assertMatches(it) }
+        (AppDatabase.V3_TABLES + AppDatabase.V4_TABLES).forEach { assertMatches(it) }
     }
 
     @Test
@@ -77,10 +77,13 @@ class RoomSchemaTest {
     fun `migration creates every table the new entities declare`() {
         // Catches the other direction: an entity added to @Database but forgotten
         // in the migration, which fails only on upgrade and not on fresh install.
-        listOf("chat_threads", "chat_messages", "message_links", "attachments").forEach { table ->
+        val created = AppDatabase.V3_TABLES + AppDatabase.V4_TABLES
+        listOf(
+            "chat_threads", "chat_messages", "message_links", "attachments", "memory_entries",
+        ).forEach { table ->
             assertTrue(
                 "Migration is missing a CREATE TABLE for `$table`",
-                AppDatabase.V3_TABLES.any { it.contains("`$table`") },
+                created.any { it.contains("`$table`") },
             )
         }
     }
@@ -99,5 +102,10 @@ class RoomSchemaTest {
             mine,
         )
         error("Migration SQL for `$table` has no counterpart in the exported schema:\n$mine")
+    }
+
+    private companion object {
+        /** Bump alongside `@Database(version = …)`; the test then checks both. */
+        const val SCHEMA_VERSION = 4
     }
 }

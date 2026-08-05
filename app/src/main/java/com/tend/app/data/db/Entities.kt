@@ -133,6 +133,37 @@ data class MessageLink(
     val createdAt: Long,
 )
 
+// ── memory vault ────────────────────────────────────────────────────────
+
+/**
+ * One vault entry. **Every user-supplied field here is ciphertext.**
+ *
+ * Only structural metadata is left readable — when it was added, what kind of
+ * thing it is, how big the payload is — because those are needed to list and
+ * sort the vault while it is locked, and none of them reveal content.
+ *
+ * Attachment bytes are not in this row: they live in `filesDir/vault` written
+ * through `EncryptedFile`, and [blobPath] names the file.
+ */
+@Entity(tableName = "memory_entries")
+data class MemoryEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val createdAt: Long,
+    val kind: String,              // "text" | "image" | "file"
+    val sizeBytes: Long = 0,
+    /** Ciphertext. A short label the user sees in the list once unlocked. */
+    val sealedTitle: String,
+    /** Ciphertext. The note body, or a caption for an image/file. */
+    val sealedBody: String,
+    /** Ciphertext. Original filename, for entries that came from a file. */
+    val sealedFileName: String = "",
+    /** Ciphertext. Text extracted by OCR, when the user has enabled it. */
+    val sealedOcrText: String = "",
+    /** Filename under filesDir/vault; empty for pure text entries. */
+    val blobPath: String = "",
+    val mime: String = "",
+)
+
 /**
  * A file or image attached to something. `ownerType`/`ownerId` rather than a
  * foreign key so chat messages, memory entries and habits can all share one
