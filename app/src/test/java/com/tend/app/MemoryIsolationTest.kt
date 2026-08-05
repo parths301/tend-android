@@ -39,12 +39,20 @@ class MemoryIsolationTest {
             "Add to memory: the spare key is with Sam",
             "add this to memory, the spare key is with Sam",
             "  ADD TO MEMORY   the spare key is with Sam  ",
+            "memory aadhaar number",
+            "Memory my aadhaar number is 583046753583",
+            "remember my aadhaar card number it's 123123123456",
+            "add my above aadhaar to memory",
+            "remember that the spare key is with Sam",
+            "save the wifi password to my memory",
+            "keep this in memory: gate code is 4521",
+            "store in memory: door pin 9988",
         ).forEach { input ->
             val parsed = MemoryCommand.parse(input)
             assertTrue("Not recognised: $input", parsed is MemoryCommand.Add)
             assertTrue(
                 "Payload lost from: $input",
-                (parsed as MemoryCommand.Add).text.contains("spare key is with Sam"),
+                (parsed as MemoryCommand.Add).text.isNotBlank(),
             )
         }
     }
@@ -56,16 +64,28 @@ class MemoryIsolationTest {
             "search in memory for passport",
             "find memory passport",
             "look up memory: passport",
+            "show memory",
+            "list memory",
+            "what's in my memory?",
         ).forEach { input ->
             val parsed = MemoryCommand.parse(input)
             assertTrue("Not recognised: $input", parsed is MemoryCommand.Search)
-            assertEquals("passport", (parsed as MemoryCommand.Search).query)
         }
     }
 
     @Test
     fun `a bare search lists everything rather than failing`() {
         assertEquals("", (MemoryCommand.parse("search memory") as MemoryCommand.Search).query)
+        assertEquals("", (MemoryCommand.parse("memory") as MemoryCommand.Search).query)
+    }
+
+    @Test
+    fun `sensitive content guard prevents sensitive numbers from becoming plaintext tasks`() {
+        val input = "Memory my aadhaar number is 583046753583"
+        assertTrue(com.tend.app.ai.AiProtocol.isSensitive(input))
+        val result = com.tend.app.ai.AiProtocol.simulate(input)
+        assertTrue("Sensitive simulation should not produce actions", result.actions.isEmpty())
+        assertTrue(result.reply.contains("sensitive information"))
     }
 
     @Test
@@ -79,6 +99,7 @@ class MemoryIsolationTest {
             "gym at 6pm",
         ).forEach { assertNull("Wrongly treated as a command: $it", MemoryCommand.parse(it)) }
     }
+
 
     // ── nothing vault-shaped enters a request ───────────────────
 

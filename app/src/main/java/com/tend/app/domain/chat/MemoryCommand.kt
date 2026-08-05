@@ -21,14 +21,48 @@ sealed interface MemoryCommand {
     data class Search(val query: String) : MemoryCommand
 
     companion object {
-        private val addRegex = Regex("""(?i)^\s*add\s+(?:this\s+)?to\s+memory[:,]?\s*(.*)$""", RegexOption.DOT_MATCHES_ALL)
-        private val searchRegex = Regex("""(?i)^\s*(?:search|find|look\s+up)\s+(?:in\s+)?memory(?:\s+for)?[:,]?\s*(.*)$""", RegexOption.DOT_MATCHES_ALL)
+        private val ALL = RegexOption.DOT_MATCHES_ALL
+
+        private val searchRegex = Regex(
+            """(?i)^\s*(?:search|find|look\s+up|show|list)\s+(?:in\s+|my\s+)?memory(?:\s+for)?[:,;]?\s*(.*)$""",
+            ALL,
+        )
+        private val whatsInMemoryRegex = Regex("""(?i)^\s*what'?s?\s+(?:is\s+)?in\s+(?:my\s+)?memory\s*\??\s*$""")
+
+        private val addPrefixRegex = Regex("""(?i)^\s*add\s+(?:this\s+)?to\s+(?:my\s+)?memory[:,;]?\s*(.*)$""", ALL)
+        private val addObjectRegex = Regex("""(?i)^\s*add\s+(.+?)\s+to\s+(?:my\s+)?memory[.!?]?\s*$""", ALL)
+        private val saveObjectRegex = Regex("""(?i)^\s*save\s+(.+?)\s+(?:to|in)\s+(?:my\s+)?memory[.!?]?\s*$""", ALL)
+        private val savePrefixRegex = Regex("""(?i)^\s*save\s+(?:this\s+)?(?:to|in)\s+(?:my\s+)?memory[:,;]?\s*(.*)$""", ALL)
+        private val keepStoreObjectRegex =
+            Regex("""(?i)^\s*(?:keep|store)\s+(.+?)\s+in\s+(?:my\s+)?memory[.!?]?\s*$""", ALL)
+        private val keepStorePrefixRegex =
+            Regex("""(?i)^\s*(?:keep|store)\s+(?:this\s+)?(?:in|to)\s+(?:my\s+)?memory[:,;]?\s*(.*)$""", ALL)
+
+
+        private val rememberRegex = Regex("""(?i)^\s*(?:please\s+)?remember\s+(?:that\s+)?(.+)$""", ALL)
+
+        private val bareRegex = Regex("""(?i)^\s*memory[:,;]?\s*(.*)$""", ALL)
+
+        private fun cleanText(text: String): String = text.trim().trimStart(',', ':', ';', '.', '-').trim()
 
         /** Null when the message is ordinary chat and should go to an engine. */
         fun parse(input: String): MemoryCommand? {
-            addRegex.find(input)?.let { return Add(it.groupValues[1].trim()) }
-            searchRegex.find(input)?.let { return Search(it.groupValues[1].trim()) }
+            searchRegex.find(input)?.let { return Search(cleanText(it.groupValues[1])) }
+            if (whatsInMemoryRegex.matches(input.trim())) return Search("")
+            rememberRegex.find(input)?.let { return Add(cleanText(it.groupValues[1])) }
+            addObjectRegex.find(input)?.let { return Add(cleanText(it.groupValues[1])) }
+            addPrefixRegex.find(input)?.let { return Add(cleanText(it.groupValues[1])) }
+            saveObjectRegex.find(input)?.let { return Add(cleanText(it.groupValues[1])) }
+            savePrefixRegex.find(input)?.let { return Add(cleanText(it.groupValues[1])) }
+            keepStoreObjectRegex.find(input)?.let { return Add(cleanText(it.groupValues[1])) }
+            keepStorePrefixRegex.find(input)?.let { return Add(cleanText(it.groupValues[1])) }
+            bareRegex.find(input)?.let {
+                val text = cleanText(it.groupValues[1])
+                return if (text.isBlank()) Search("") else Add(text)
+            }
             return null
         }
     }
 }
+
+

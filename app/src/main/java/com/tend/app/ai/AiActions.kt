@@ -192,14 +192,30 @@ object AiProtocol {
         "(?i)\\bhabits?\\b|\\bevery ?day\\b|\\bdaily\\b|^\\s*(quit|stop)\\s+"
     )
 
+    private val sensitiveGuardRegex = Regex(
+        "(?i)\\b(?:aadhaar|ssn|social security|credit card|cvv|pin|password|passport|secret)\\b|\\b\\d{12}\\b|\\b\\d{16}\\b"
+    )
+
+    fun isSensitive(text: String): Boolean = sensitiveGuardRegex.containsMatchIn(text)
+
     /**
      * Offline fallback — simple rules, no AI model involved:
      * habit-sounding requests become habits, "at 5pm" requests become plan
      * blocks, day-planning needs a real key, anything else becomes a task.
      */
     fun simulate(input: String): AiResult {
+        if (isSensitive(input)) {
+            return AiResult(
+                reply = "This message contains sensitive information (ID, card, or credentials). " +
+                    "To protect your privacy, Tend will not create a plaintext task out of it. " +
+                    "Use the encrypted Memory Vault to store sensitive items safely.",
+                actions = emptyList(),
+            )
+        }
+
         // Habit intent
         if (habitRegex.containsMatchIn(input)) {
+
             val name = input
                 .replace(prefixRegex, "")
                 .replace(Regex("(?i)\\ba\\s+habit\\s+(to|of|for)\\s+"), "")

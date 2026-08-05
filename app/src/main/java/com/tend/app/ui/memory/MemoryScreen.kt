@@ -176,15 +176,28 @@ private fun UnlockCard(vm: MainViewModel) {
     }
 }
 
+enum class MemoryCategoryFilter { All, Notes, Images, Documents }
+
 @Composable
 private fun UnlockedVault(vm: MainViewModel) {
     val context = LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val results by vm.memoryResults.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf(MemoryCategoryFilter.All) }
     var adding by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(query) { vm.refreshMemory(query) }
+
+    val filteredResults = remember(results, selectedFilter) {
+        when (selectedFilter) {
+            MemoryCategoryFilter.All -> results
+            MemoryCategoryFilter.Notes -> results.filter { it.kind == com.tend.app.data.vault.MemoryRepository.KIND_TEXT }
+            MemoryCategoryFilter.Images -> results.filter { it.isImage }
+            MemoryCategoryFilter.Documents -> results.filter { it.kind == com.tend.app.data.vault.MemoryRepository.KIND_FILE && !it.isImage }
+        }
+    }
 
     // Import copies the file into the vault; the picked URI is not retained, so
     // no persistable permission is needed here.
@@ -218,6 +231,24 @@ private fun UnlockedVault(vm: MainViewModel) {
                     Action("Add note") { adding = true }
                     Outline("Add file") { picker.launch(arrayOf("*/*")) }
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    MemoryCategoryFilter.entries.forEach { filter ->
+                        val selected = filter == selectedFilter
+                        Box(
+                            Modifier
+                                .background(if (selected) Ink else SegBg, RoundedCornerShape(99.dp))
+                                .tapNoRipple(TendHaptic.Select) { selectedFilter = filter }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                filter.name,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) Cream else Muted,
+                            )
+                        }
+                    }
+                }
                 val ocrOn by vm.ocrEnabled.collectAsStateWithLifecycle()
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -248,7 +279,7 @@ private fun UnlockedVault(vm: MainViewModel) {
 
         TendCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(vertical = 4.dp)) {
-                if (results.isEmpty()) {
+                if (filteredResults.isEmpty()) {
                     Text(
                         if (query.isBlank()) "Nothing saved yet."
                         else "Nothing matches \"$query\".",
@@ -256,9 +287,18 @@ private fun UnlockedVault(vm: MainViewModel) {
                         modifier = Modifier.padding(16.dp),
                     )
                 }
-                results.forEachIndexed { index, item ->
+                filteredResults.forEachIndexed { index, item ->
                     if (index > 0) HorizontalDivider(color = RowDivider, thickness = 1.dp)
-                    MemoryRow(item) { confirmDelete = item.id }
+                    MemoryRow(
+                        item = item,
+                        onCopy = {
+                            val text = item.body.ifBlank { item.title }
+                            if (text.isNotBlank()) {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                            }
+                        },
+                        onDelete = { confirmDelete = item.id },
+                    )
                 }
             }
         }
@@ -284,7 +324,7 @@ private fun UnlockedVault(vm: MainViewModel) {
 }
 
 @Composable
-private fun MemoryRow(item: MemoryItem, onDelete: () -> Unit) {
+private fun MemoryRow(item: MemoryItem, onCopy: () -> Unit, onDelete: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -313,11 +353,19 @@ private fun MemoryRow(item: MemoryItem, onDelete: () -> Unit) {
                 listOfNotNull(
                     stamp(item.createdAt),
                     item.body.takeIf { it.isNotBlank() && it != item.title }?.take(40),
+                    if (item.ocrText.isNotBlank()) "OCR Extracted" else null,
                 ).joinToString(" · "),
                 fontSize = 10.5.sp, color = Faint,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
+        Text(
+            "📋",
+            fontSize = 13.sp,
+            modifier = Modifier
+                .tapNoRipple(TendHaptic.Select, onCopy)
+                .padding(horizontal = 4.dp),
+        )
         Text(
             "🗑",
             fontSize = 12.sp,
@@ -325,6 +373,7 @@ private fun MemoryRow(item: MemoryItem, onDelete: () -> Unit) {
         )
     }
 }
+
 
 @Composable
 private fun RecoveryCodeDialog(code: String, onDismiss: () -> Unit) {

@@ -22,12 +22,14 @@ val hasReleaseKeystore = keystoreProps.getProperty("storeFile") != null
 
 android {
     namespace = "com.tend.app"
-    compileSdk = 35
+    compileSdk = 36
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "com.tend.app"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
+
         versionCode = 6
         versionName = "2.1.0"
     }

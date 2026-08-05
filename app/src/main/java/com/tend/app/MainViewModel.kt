@@ -1039,7 +1039,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
                 // Attachments belong to the message that carried them, so they
                 // are written before anything can fail downstream.
-                pendingAttachmentsState.value.takeIf { it.isNotEmpty() }?.let { pending ->
+                val capturedAttachments = pendingAttachmentsState.value
+                capturedAttachments.takeIf { it.isNotEmpty() }?.let { pending ->
                     chatRepo.attachTo(
                         userMessageId,
                         pending.map {
@@ -1064,11 +1065,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     chatRepo.append(
                         threadId = threadId,
                         fromAi = true,
-                        text = runMemoryCommand(command),
+                        text = runMemoryCommand(command, capturedAttachments),
                         source = ResponseSource.System,
                     )
                     return@launch
                 }
+
 
                 val config = AdvancedConfig.load(advancedJson.value)
                 val request = AiExecutionRouter.buildRequest(
@@ -1293,7 +1295,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * chat messages are stored unencrypted, so spilling vault contents into a
      * thread would quietly undo the encryption the user asked for.
      */
-    private suspend fun runMemoryCommand(command: MemoryCommand): String {
+    private suspend fun runMemoryCommand(
+        command: MemoryCommand,
+        attachments: List<PendingAttachment> = emptyList(),
+    ): String {
         if (vaultSession.state.value != VaultState.Unlocked) {
             return if (vaultSession.isSetUp()) {
                 "Memory is locked. Open it from Settings → Memory to unlock, then try again."
@@ -1304,12 +1309,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         return when (command) {
             is MemoryCommand.Add -> {
-                if (command.text.isBlank()) {
-                    "Tell me what to remember, like \"add to memory: spare key is with Sam\"."
+                val hasText = command.text.isNotBlank()
+                val hasFiles = attachments.isNotEmpty()
+                if (!hasText && !hasFiles) {
+                    "Tell me what to remember or attach a file, like \"add to memory: spare key is with Sam\"."
                 } else {
-                    memoryRepo.addText(command.text.take(60), command.text)
+                    var noteSaved = false
+                    if (hasText) {
+                        memoryRepo.addText(command.text.take(60), command.text)
+                        noteSaved = true
+                    }
+                    var fileCount = 0
+                    for (att in attachments) {
+                        val ocr = if (ocrEnabled.value && att.mime.startsWith("image/")) {
+                            withContext(Dispatchers.Default) { OcrExtractor.extract(getApplication(), att.uri) }
+                        } else {
+                            null
+                        }
+                        memoryRepo.addFile(
+                            uri = att.uri,
+                            displayName = att.displayName,
+                            mime = att.mime,
+                            caption = if (hasText) command.text else att.displayName,
+                            ocrText = ocr.orEmpty(),
+                        )
+                        fileCount++
+                    }
                     refreshMemory("")
-                    "Saved to Memory, encrypted. It stays out of every AI request."
+                    val details = listOfNotNull(
+                        "note".takeIf { noteSaved },
+                        "$fileCount file(s)".takeIf { fileCount > 0 },
+                    ).joinToString(" and ")
+                    "Saved $details to Memory, encrypted. It stays out of every AI request."
                 }
             }
 
@@ -1327,6 +1358,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
 
     // ── chat management ─────────────────────────────────────────
 
