@@ -674,23 +674,22 @@ private fun BackupCard(vm: MainViewModel) {
             // same row, same weight. Now failure shakes once and buzzes Reject,
             // success ticks a Confirm, so the outcome registers before the text
             // is even read.
-            message?.let { text ->
-                val failed = status.failed
-                LaunchedEffect(text) {
-                    haptics.perform(if (failed) TendHaptic.Reject else TendHaptic.Confirm)
+            message?.let { banner ->
+                LaunchedEffect(banner) {
+                    haptics.perform(if (banner.failed) TendHaptic.Reject else TendHaptic.Confirm)
                 }
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .shakeOnError(if (failed) text else null),
+                        .shakeOnError(if (banner.failed) banner else null),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text,
+                        banner.text,
                         fontSize = 12.sp,
                         lineHeight = 17.sp,
-                        color = if (failed) Terracotta else Ink,
+                        color = if (banner.failed) Terracotta else Ink,
                         modifier = Modifier.weight(1f),
                     )
                     Text(

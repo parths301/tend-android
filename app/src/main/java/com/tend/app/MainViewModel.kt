@@ -94,6 +94,13 @@ data class Celebration(
     enum class Kind { DayComplete, StreakMilestone }
 }
 
+/**
+ * A line of feedback from a backup action. Like [AutoPlanMessage], it carries
+ * its own outcome: the persisted [BackupStatus] only covers `backupNow`, so an
+ * export or restore failure would otherwise be indistinguishable from success.
+ */
+data class BackupMessage(val text: String, val failed: Boolean)
+
 /** Outcome of the most recent backup attempt, scheduled or manual. */
 data class BackupStatus(
     val atMillis: Long = 0L,
@@ -228,8 +235,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val backupBusyState = MutableStateFlow(false)
     val backupBusy: StateFlow<Boolean> = backupBusyState.asStateFlow()
-    private val backupMessageState = MutableStateFlow<String?>(null)
-    val backupMessage: StateFlow<String?> = backupMessageState.asStateFlow()
+    private val backupMessageState = MutableStateFlow<BackupMessage?>(null)
+    val backupMessage: StateFlow<BackupMessage?> = backupMessageState.asStateFlow()
     private val pendingRestoreState = MutableStateFlow<PendingRestore?>(null)
     val pendingRestore: StateFlow<PendingRestore?> = pendingRestoreState.asStateFlow()
 
@@ -542,12 +549,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                 )
             } catch (e: SecurityException) {
-                backupMessageState.value = "Couldn't keep access to that folder — try another one."
+                backupMessageState.value =
+                    BackupMessage("Couldn't keep access to that folder — try another one.", failed = true)
                 return@launch
             }
             settings.setBackupFolder(uri.toString())
             BackupScheduler.sync(getApplication(), force = true)
-            backupMessageState.value = "Backup folder set to ${BackupManager.folderLabel(uri.toString())}."
+            backupMessageState.value = BackupMessage(
+                "Backup folder set to ${BackupManager.folderLabel(uri.toString())}.",
+                failed = false,
+            )
         }
     }
 
@@ -570,9 +581,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val result = BackupManager.backupNow(getApplication())
                 backupMessageState.value =
-                    "Backed up ${result.rows} entries to ${result.fileName}."
+                    BackupMessage("Backed up ${result.rows} entries to ${result.fileName}.", failed = false)
             } catch (e: Exception) {
-                backupMessageState.value = e.readableMessage()
+                backupMessageState.value = BackupMessage(e.readableMessage(), failed = true)
             } finally {
                 backupBusyState.value = false
             }
@@ -586,9 +597,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val result = BackupManager.exportTo(getApplication(), uri)
-                backupMessageState.value = "Saved ${result.rows} entries to ${result.fileName}."
+                backupMessageState.value =
+                    BackupMessage("Saved ${result.rows} entries to ${result.fileName}.", failed = false)
             } catch (e: Exception) {
-                backupMessageState.value = e.readableMessage()
+                backupMessageState.value = BackupMessage(e.readableMessage(), failed = true)
             } finally {
                 backupBusyState.value = false
             }
@@ -604,7 +616,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val snapshot = BackupManager.read(getApplication(), uri)
                 pendingRestoreState.value = PendingRestore(snapshot, BackupFormat.problems(snapshot))
             } catch (e: Exception) {
-                backupMessageState.value = e.readableMessage()
+                backupMessageState.value = BackupMessage(e.readableMessage(), failed = true)
             } finally {
                 backupBusyState.value = false
             }
@@ -625,9 +637,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 repo.materializeHabitBlocks(today)
                 shellState.update { it.copy(tab = Tab.Today, detailHabitId = 1L) }
                 chatState.value = emptyList()
-                backupMessageState.value = "Restored ${pending.snapshot.rowCount} entries."
+                backupMessageState.value =
+                    BackupMessage("Restored ${pending.snapshot.rowCount} entries.", failed = false)
             } catch (e: Exception) {
-                backupMessageState.value = "Restore failed: ${e.readableMessage()}"
+                backupMessageState.value =
+                    BackupMessage("Restore failed: ${e.readableMessage()}", failed = true)
             } finally {
                 backupBusyState.value = false
             }
@@ -640,7 +654,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 onIntent(BackupManager.shareIntent(getApplication()))
             } catch (e: Exception) {
-                backupMessageState.value = e.readableMessage()
+                backupMessageState.value = BackupMessage(e.readableMessage(), failed = true)
             }
         }
     }

@@ -44,32 +44,32 @@ fun TendLottie(
     val result = rememberLottieComposition(LottieCompositionSpec.RawRes(resId))
     val composition by result
 
-    if (reduceMotion) {
-        LaunchedEffect(Unit) { onFinished?.invoke() }
-        return
-    }
-
     // A composition that failed to parse must not leave a silent blank.
-    if (result.isFailure || (composition == null && result.isComplete)) {
-        fallback()
-        LaunchedEffect(Unit) { onFinished?.invoke() }
-        return
-    }
+    val playable = !reduceMotion && !result.isFailure
 
+    // Driving the clock with a null composition parks progress at 0, so the
+    // single call below covers the playing, loading and failed cases without
+    // branching the composition tree — a conditional Lottie call would tear
+    // down and rebuild the animation whenever load state changed.
     val progress by animateLottieCompositionAsState(
-        composition = composition,
+        composition = if (playable) composition else null,
         iterations = iterations,
         speed = speed,
     )
 
-    LottieAnimation(
-        composition = composition,
-        progress = { progress },
-        modifier = modifier,
-    )
+    when {
+        reduceMotion -> Unit
+        result.isFailure -> fallback()
+        else -> LottieAnimation(
+            composition = composition,
+            progress = { progress },
+            modifier = modifier,
+        )
+    }
 
-    if (onFinished != null && progress >= 1f && composition != null) {
-        LaunchedEffect(progress) { onFinished() }
+    LaunchedEffect(playable, composition, progress) {
+        val finished = !playable || (composition != null && progress >= 1f)
+        if (finished) onFinished?.invoke()
     }
 }
 

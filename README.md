@@ -34,6 +34,46 @@ and [`chats/chat1.md`](chats/chat1.md)).
   structured JSON action (`add_task` / `add_plan` / `add_habit`) that the app applies. Default
   model: `claude-opus-4-8`. Network failures fall back to the offline parser.
 
+## Motion & haptics
+
+`ui/motion/` is a small shared layer, not per-screen animation code.
+
+| File | What it holds |
+|---|---|
+| `TendMotion.kt` | Spring and scale tokens, plus `LocalReduceMotion` |
+| `TendHaptics.kt` | `TendHaptic` vocabulary → `HapticFeedbackConstants`, API-gated |
+| `MotionModifiers.kt` | `bouncyTap`, `successPop`, `shakeOnError` |
+| `TendLottie.kt` | Lottie wrapper with a Compose fallback |
+| `CelebrationOverlay.kt` | Full-screen celebration, tap-to-dismiss and self-retiring |
+
+**The feel comes from asymmetric damping.** A control collapses under the
+finger with a critically damped spring (instant, no wobble, so the press reads
+as physical contact) and springs back with an underdamped one (`dampingRatio
+0.42`, so the release rebounds). Duration-based easing can't express that
+difference; a spring pair can, in under 250ms.
+
+**Haptics go through `View.performHapticFeedback`**, not `Vibrator`. That needs
+no `VIBRATE` permission, the constants are remapped per device by the OEM's
+haptic profile, and it respects the system touch-feedback setting for free.
+Constants added after `minSdk` 26 (`CONFIRM`/`REJECT` at 30, `TOGGLE_ON`/`OFF`
+at 34) are gated and degrade rather than going silent.
+
+> Compose's own `HapticFeedbackType` only exposes `LongPress` and
+> `TextHandleMove` on Compose UI 1.7, which this project uses; `Confirm`,
+> `Reject` and `SegmentTick` landed in 1.8. On a BOM bump, `TendHaptics.constantFor()`
+> is the only thing that needs to change.
+
+Rules of thumb: `tapNoRipple` for any tap (light haptic, no movement),
+`bouncyTap` for controls that should move, `TendHaptic.Confirm` only for
+actions that actually completed, and Lottie only for celebrations.
+
+Reduced motion is honoured from the platform animator duration scale, so the
+accessibility "Remove animations" toggle disables every bounce, pop, shake and
+celebration from one place.
+
+Lottie assets live in `res/raw/`. The two shipped files are **generated
+placeholders** — replace them with designed animations, keeping the filenames.
+
 ## Backup & restore
 
 Settings → **Backup & restore** writes everything (habits, check-ins, tasks,
