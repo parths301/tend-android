@@ -119,6 +119,11 @@ dependencies {
     // Anthropic SDK for the BYOK "Ask Tend" integration
     implementation("com.anthropic:anthropic-java:2.34.0")
 
+    // Unbundled ML Kit: the client library ships, the OCR model does not — Play
+    // services fetches it the first time the user turns OCR on. Keeps the APK
+    // small and keeps the download an explicit choice rather than a surprise.
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 

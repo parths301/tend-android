@@ -22,6 +22,7 @@ import com.tend.app.data.backup.BackupSnapshot
 import com.tend.app.data.backup.readableMessage
 import com.tend.app.data.vault.MemoryItem
 import com.tend.app.data.vault.MemoryRepository
+import com.tend.app.data.vault.OcrExtractor
 import com.tend.app.data.vault.UnlockResult
 import com.tend.app.data.vault.VaultSession
 import com.tend.app.data.vault.VaultState
@@ -1257,9 +1258,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun addMemoryFile(uri: Uri, displayName: String, mime: String, caption: String) {
         viewModelScope.launch {
-            memoryRepo.addFile(uri, displayName, mime, caption)
+            // OCR runs before the row is written so the extracted text is
+            // encrypted with everything else, never stored in the clear first.
+            val ocr = if (ocrEnabled.value && mime.startsWith("image/")) {
+                withContext(Dispatchers.Default) { OcrExtractor.extract(getApplication(), uri) }
+            } else {
+                null
+            }
+            memoryRepo.addFile(uri, displayName, mime, caption, ocr.orEmpty())
             refreshMemory("")
         }
+    }
+
+    val ocrEnabled: StateFlow<Boolean> =
+        settings.ocrEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setOcrEnabled(enabled: Boolean) {
+        viewModelScope.launch { settings.setOcrEnabled(enabled) }
     }
 
     fun deleteMemory(id: Long) {

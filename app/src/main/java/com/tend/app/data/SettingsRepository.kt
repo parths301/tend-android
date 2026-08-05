@@ -29,6 +29,7 @@ class SettingsRepository(context: Context) {
     private val heatmapWeeksKey = intPreferencesKey("heatmap_weeks")
     private val showAiBarKey = booleanPreferencesKey("show_ai_bar")
     private val chatModeKey = stringPreferencesKey("chat_mode")
+    private val ocrEnabledKey = booleanPreferencesKey("memory_ocr_enabled")
     private val customPromptKey = stringPreferencesKey("custom_system_prompt")
     private val advancedJsonKey = stringPreferencesKey("advanced_json")
     private val personalitiesKey = stringPreferencesKey("personalities")
@@ -61,6 +62,9 @@ class SettingsRepository(context: Context) {
     val showAiBar: Flow<Boolean> = store.data.map { it[showAiBarKey] ?: true }
     /** The mode the user selected. What actually runs also depends on a key existing. */
     val chatMode: Flow<ChatMode> = store.data.map { ChatMode.from(it[chatModeKey]) }
+
+    /** Off by default: turning it on triggers a model download. */
+    val ocrEnabled: Flow<Boolean> = store.data.map { it[ocrEnabledKey] ?: false }
 
     /** Empty means "use the shipped prompt" — not "send no prompt". */
     val customPrompt: Flow<String> = store.data.map { it[customPromptKey].orEmpty() }
@@ -106,6 +110,10 @@ class SettingsRepository(context: Context) {
 
     suspend fun setChatMode(mode: ChatMode) {
         store.edit { it[chatModeKey] = mode.stored }
+    }
+
+    suspend fun setOcrEnabled(enabled: Boolean) {
+        store.edit { it[ocrEnabledKey] = enabled }
     }
 
     suspend fun setCustomPrompt(prompt: String) {

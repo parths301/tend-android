@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -216,11 +218,31 @@ private fun UnlockedVault(vm: MainViewModel) {
                     Action("Add note") { adding = true }
                     Outline("Add file") { picker.launch(arrayOf("*/*")) }
                 }
-                Text(
-                    "Searches what you typed and the names of files you added. It doesn't read " +
-                        "the inside of images.",
-                    fontSize = 11.sp, color = Faint, lineHeight = 15.sp,
-                )
+                val ocrOn by vm.ocrEnabled.collectAsStateWithLifecycle()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Read text inside images", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (ocrOn) {
+                                "On. Text found in images is encrypted with the rest of the entry."
+                            } else {
+                                "Off. Search covers what you typed and the names of files you " +
+                                    "added. Turning this on downloads a recognition model the " +
+                                    "first time it runs; the images themselves never leave your " +
+                                    "device."
+                            },
+                            fontSize = 11.sp, color = Faint, lineHeight = 15.sp,
+                        )
+                    }
+                    Switch(
+                        checked = ocrOn,
+                        onCheckedChange = { vm.setOcrEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = Teal,
+                            checkedThumbColor = Cream,
+                        ),
+                    )
+                }
             }
         }
 
