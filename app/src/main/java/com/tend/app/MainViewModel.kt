@@ -71,7 +71,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 
-enum class Tab { Today, Plan, Tasks, Stats, Detail, Settings }
+enum class Tab { Today, Plan, Tasks, Stats, Detail, Settings, Memory }
 enum class HabitView { Grid, Week }
 
 /** A habit joined with everything derived from its log history. */

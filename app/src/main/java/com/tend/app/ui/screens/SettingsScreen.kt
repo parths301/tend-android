@@ -64,6 +64,7 @@ import com.tend.app.ai.OpenRouterCatalog
 import com.tend.app.data.SettingsRepository
 import com.tend.app.data.backup.BackupFormat
 import com.tend.app.data.backup.BackupManager
+import com.tend.app.data.vault.VaultState
 import com.tend.app.domain.Time
 import com.tend.app.ui.components.DialogInput
 import com.tend.app.ui.components.Kicker
@@ -315,6 +316,61 @@ fun SettingsScreen(vm: MainViewModel) {
                     Text(
                         "No key — Ask Tend runs in offline mode",
                         fontSize = 11.5.sp, color = Faint,
+                    )
+                }
+            }
+        }
+
+        // ── Memory ──────────────────────────────────────
+        SectionLabel("MEMORY")
+        TendCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val vaultState by vm.vaultState.collectAsStateWithLifecycle()
+                val memoryCount by vm.memoryCount.collectAsStateWithLifecycle()
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Encrypted vault",
+                        fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        when (vaultState) {
+                            VaultState.NotSetUp -> "Not set up"
+                            VaultState.Locked -> "Locked"
+                            VaultState.Unlocked -> "Unlocked"
+                        },
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (vaultState == VaultState.Unlocked) Teal else Muted,
+                    )
+                }
+                Text(
+                    "Notes and files encrypted with a key derived from a password you set. " +
+                        "Memory is never included in what the assistant sees — in either mode — " +
+                        "and that exclusion is built into how the app is wired, not a setting " +
+                        "that can be flipped.",
+                    fontSize = 12.5.sp, color = Muted, lineHeight = 18.sp,
+                )
+                if (vaultState != VaultState.NotSetUp) {
+                    Text(
+                        "$memoryCount ${if (memoryCount == 1) "entry" else "entries"} stored",
+                        fontSize = 11.5.sp, color = Faint,
+                    )
+                }
+                Box(
+                    Modifier
+                        .background(Ink, RoundedCornerShape(99.dp))
+                        .bouncyTap(haptic = TendHaptic.Select) { vm.selectTab(Tab.Memory) }
+                        .padding(horizontal = 16.dp, vertical = 9.dp)
+                ) {
+                    Text(
+                        when (vaultState) {
+                            VaultState.NotSetUp -> "Set up Memory"
+                            VaultState.Locked -> "Unlock Memory"
+                            VaultState.Unlocked -> "Open Memory"
+                        },
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Cream,
                     )
                 }
             }

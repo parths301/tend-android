@@ -4,8 +4,11 @@ import com.tend.app.data.backup.BackupFormat
 import com.tend.app.data.backup.BackupFormatException
 import com.tend.app.data.backup.BackupSettings
 import com.tend.app.data.backup.BackupSnapshot
+import com.tend.app.data.db.ChatMessage
+import com.tend.app.data.db.ChatThread
 import com.tend.app.data.db.Habit
 import com.tend.app.data.db.HabitLog
+import com.tend.app.data.db.MessageLink
 import com.tend.app.data.db.NoteEntry
 import com.tend.app.data.db.PlanBlock
 import com.tend.app.data.db.TaskItem
@@ -51,6 +54,89 @@ class BackupFormatTest {
         ),
     )
 
+    private fun withChat(): BackupSnapshot = sample().copy(
+        threads = listOf(
+            ChatThread(id = 50, title = "Groceries", createdAt = 1L, updatedAt = 2L, mode = "ai", draft = "half typed"),
+        ),
+        messages = listOf(
+            ChatMessage(id = 60, threadId = 50, fromAi = false, text = "buy milk", createdAt = 1L, source = "system"),
+            ChatMessage(
+                id = 61, threadId = 50, fromAi = true, text = "Added it.", createdAt = 2L,
+                source = "cloud", modelId = "claude-opus-4-8", inContext = true,
+            ),
+        ),
+        links = listOf(
+            MessageLink(id = 70, messageId = 61, entityType = "task", entityId = 20, label = "Buy groceries", createdAt = 2L),
+        ),
+    )
+
+    @Test
+    fun `round trips chat threads, messages and links`() {
+        val decoded = BackupFormat.decode(BackupFormat.encode(withChat()))
+
+        assertEquals(1, decoded.threads.size)
+        assertEquals("half typed", decoded.threads[0].draft)
+        assertEquals(2, decoded.messages.size)
+        assertEquals("claude-opus-4-8", decoded.messages[1].modelId)
+        assertTrue(decoded.messages[1].inContext)
+        // A message with no model must come back as null, not the string "null".
+        assertNull(decoded.messages[0].modelId)
+        assertEquals(1, decoded.links.size)
+        assertEquals(20L, decoded.links[0].entityId)
+    }
+
+    @Test
+    fun `a restored link still points at the task it created`() {
+        // The whole reason task ids are preserved: after a round trip through
+        // sanitize, the link's entityId must still match a task that exists.
+        val clean = BackupFormat.sanitize(withChat())
+        val linkTarget = clean.links.single().entityId
+        assertTrue(
+            "Restored link points at a task that no longer exists",
+            clean.tasks.any { it.id == linkTarget },
+        )
+    }
+
+    @Test
+    fun `sanitize drops messages whose thread is gone and links whose message is gone`() {
+        val damaged = withChat().let {
+            it.copy(
+                messages = it.messages + ChatMessage(
+                    id = 62, threadId = 999, fromAi = false, text = "orphan",
+                    createdAt = 3L, source = "system",
+                ),
+                links = it.links + MessageLink(
+                    id = 71, messageId = 999, entityType = "task", entityId = 20,
+                    label = "orphan", createdAt = 3L,
+                ),
+            )
+        }
+        val clean = BackupFormat.sanitize(damaged)
+        assertEquals(2, clean.messages.size)
+        assertEquals(1, clean.links.size)
+    }
+
+    @Test
+    fun `a link to a deleted entity is kept on purpose`() {
+        // Requirement F's graceful-degradation case: the chip has to survive so
+        // the UI can say the task was deleted, rather than silently vanishing.
+        val danglingTarget = withChat().copy(tasks = emptyList())
+        val clean = BackupFormat.sanitize(danglingTarget)
+        assertEquals(1, clean.links.size)
+    }
+
+    @Test
+    fun `a version 1 file without any chat still restores`() {
+        // Backups written before chat existed have no chat arrays at all.
+        val v1 = BackupFormat.encode(sample())
+            .replace("\"version\": ${BackupFormat.VERSION}", "\"version\": 1")
+        val decoded = BackupFormat.decode(v1)
+        assertEquals(2, decoded.habits.size)
+        assertTrue(decoded.threads.isEmpty())
+        assertTrue(decoded.messages.isEmpty())
+        assertTrue(decoded.links.isEmpty())
+    }
+
     @Test
     fun `round trips every table and setting`() {
         val original = sample()
@@ -95,7 +181,8 @@ class BackupFormatTest {
 
     @Test
     fun `rejects a newer format version`() {
-        val bumped = BackupFormat.encode(sample()).replace("\"version\": 1", "\"version\": 99")
+        val bumped = BackupFormat.encode(sample())
+            .replace("\"version\": ${BackupFormat.VERSION}", "\"version\": 99")
         val e = runCatching { BackupFormat.decode(bumped) }.exceptionOrNull()
         assertTrue(e is BackupFormatException)
         assertTrue(e!!.message!!.contains("newer version"))
@@ -120,7 +207,7 @@ class BackupFormatTest {
     }
 
     @Test
-    fun `sanitize drops orphans and clears child ids`() {
+    fun `sanitize drops orphans and keeps the keys links depend on`() {
         val damaged = sample().let {
             it.copy(
                 logs = it.logs + HabitLog(id = 12, habitId = 999, epochDay = 20_100, done = true),
@@ -132,11 +219,19 @@ class BackupFormatTest {
         assertEquals(2, clean.logs.size)
         assertEquals(1, clean.notes.size)
         assertTrue(BackupFormat.problems(clean).isEmpty())
-        // Habit ids are the join key and must survive; everything else is reassigned by Room.
+
+        // Habit ids are the join key for logs and notes. Task and plan ids are
+        // kept for a second reason: message_links records the id of whatever a
+        // chat message created, so reassigning them would restore the data and
+        // silently break every chip pointing at it. Restore clears the tables
+        // first, so there is nothing for the preserved ids to collide with.
         assertEquals(listOf(1L, 2L), clean.habits.map { it.id })
+        assertEquals(sample().tasks.map { it.id }, clean.tasks.map { it.id })
+        assertEquals(sample().plans.map { it.id }, clean.plans.map { it.id })
+
+        // Logs and notes carry no inbound references, so they are still free to
+        // be reassigned by Room.
         assertTrue(clean.logs.all { it.id == 0L })
-        assertTrue(clean.tasks.all { it.id == 0L })
-        assertTrue(clean.plans.all { it.id == 0L })
         assertTrue(clean.notes.all { it.id == 0L })
     }
 
@@ -162,7 +257,7 @@ class BackupFormatTest {
     fun `written file is self-describing`() {
         val json = BackupFormat.encode(sample())
         assertTrue(json.contains("\"format\": \"tend-backup\""))
-        assertTrue(json.contains("\"version\": 1"))
+        assertTrue(json.contains("\"version\": ${BackupFormat.VERSION}"))
         assertTrue(json.contains("\"counts\""))
         // Secrets never reach the file.
         assertTrue(!json.contains("api_key") && !json.contains("apiKey"))

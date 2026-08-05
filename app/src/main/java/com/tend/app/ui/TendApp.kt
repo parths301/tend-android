@@ -51,6 +51,7 @@ import com.tend.app.ui.motion.TendHaptic
 import com.tend.app.ui.motion.TendMotion
 import com.tend.app.ui.motion.bouncyTap
 import com.tend.app.ui.chat.ChatSurface
+import com.tend.app.ui.memory.MemoryScreen
 import com.tend.app.ui.screens.DetailScreen
 import com.tend.app.ui.screens.PlanScreen
 import com.tend.app.ui.screens.SettingsScreen
@@ -78,7 +79,9 @@ fun TendApp(vm: MainViewModel = viewModel()) {
 
     // Back closes overlays / detail screens before exiting the app. Full-screen
     // chat collapses to the sheet first, so back never skips a step.
-    BackHandler(enabled = shell.aiOpen || shell.tab == Tab.Detail || shell.tab == Tab.Settings) {
+    BackHandler(enabled = shell.aiOpen || shell.tab == Tab.Detail || shell.tab == Tab.Settings ||
+            shell.tab == Tab.Memory
+    ) {
         when {
             shell.aiOpen && shell.chatSize == ChatSize.FullScreen -> vm.collapseChat()
             shell.aiOpen -> vm.closeAi()
@@ -132,12 +135,14 @@ fun TendApp(vm: MainViewModel = viewModel()) {
                             Tab.Stats -> StatsScreen(vm)
                             Tab.Detail -> DetailScreen(vm)
                             Tab.Settings -> SettingsScreen(vm)
+                            Tab.Memory -> MemoryScreen(vm)
                         }
                     }
                 }
             }
 
-            val aiBarVisible = showAiBar && shell.tab != Tab.Detail && shell.tab != Tab.Settings
+            val aiBarVisible = showAiBar &&
+                shell.tab !in setOf(Tab.Detail, Tab.Settings, Tab.Memory)
             if (aiBarVisible) {
                 AiBar { vm.openAi() }
             }
