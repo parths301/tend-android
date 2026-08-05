@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tend.app.Celebration
+import com.tend.app.ChatSize
 import com.tend.app.MainViewModel
 import com.tend.app.Tab
 import com.tend.app.ui.motion.CelebrationOverlay
@@ -49,7 +50,7 @@ import com.tend.app.ui.motion.CelebrationStyle
 import com.tend.app.ui.motion.TendHaptic
 import com.tend.app.ui.motion.TendMotion
 import com.tend.app.ui.motion.bouncyTap
-import com.tend.app.ui.screens.AiSheet
+import com.tend.app.ui.chat.ChatSurface
 import com.tend.app.ui.screens.DetailScreen
 import com.tend.app.ui.screens.PlanScreen
 import com.tend.app.ui.screens.SettingsScreen
@@ -75,9 +76,14 @@ fun TendApp(vm: MainViewModel = viewModel()) {
         vm.celebrations.collect { celebration = it }
     }
 
-    // Back closes overlays / detail screens before exiting the app.
+    // Back closes overlays / detail screens before exiting the app. Full-screen
+    // chat collapses to the sheet first, so back never skips a step.
     BackHandler(enabled = shell.aiOpen || shell.tab == Tab.Detail || shell.tab == Tab.Settings) {
-        if (shell.aiOpen) vm.closeAi() else vm.selectTab(Tab.Today)
+        when {
+            shell.aiOpen && shell.chatSize == ChatSize.FullScreen -> vm.collapseChat()
+            shell.aiOpen -> vm.closeAi()
+            else -> vm.selectTab(Tab.Today)
+        }
     }
 
     // Notification deep links (e.g. nightly check-in → tomorrow's plan).
@@ -139,8 +145,11 @@ fun TendApp(vm: MainViewModel = viewModel()) {
             NavBar(current = shell.tab, onSelect = vm::selectTab)
         }
 
+        // One chat, drawn over the shell at whichever size it is in. Full screen
+        // is not a separate destination — the tab bar simply stays behind it —
+        // so the composer, list and every action are literally the same state.
         if (shell.aiOpen) {
-            AiSheet(vm)
+            ChatSurface(vm)
         }
 
         celebration?.let { moment ->

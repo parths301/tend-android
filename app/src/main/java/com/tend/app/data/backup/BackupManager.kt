@@ -57,6 +57,9 @@ object BackupManager {
             plans = db.planDao().allOnce(),
             notes = db.noteDao().allOnce(),
             settings = SettingsRepository(context).snapshot(),
+            threads = db.chatDao().threadsOnce(),
+            messages = db.chatDao().allMessagesOnce(),
+            links = db.chatDao().allLinksOnce(),
         )
     }
 
@@ -211,6 +214,10 @@ object BackupManager {
         val db = AppDatabase.get(context)
 
         db.withTransaction {
+            // Attachments and chat first: messages cascade from threads, so the
+            // rows must go before the tables they point at are rebuilt.
+            db.chatDao().clearAttachments()
+            db.chatDao().clearThreads()
             db.noteDao().clearNotes()
             db.planDao().clearPlans()
             db.taskDao().clearTasks()
@@ -222,6 +229,9 @@ object BackupManager {
             db.taskDao().insertAll(clean.tasks)
             db.planDao().insertAll(clean.plans)
             db.noteDao().insertAll(clean.notes)
+            db.chatDao().insertThreads(clean.threads)
+            db.chatDao().insertMessages(clean.messages)
+            db.chatDao().insertLinks(clean.links)
         }
 
         clean.settings?.let { SettingsRepository(context).applySnapshot(it) }

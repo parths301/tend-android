@@ -65,6 +65,9 @@ interface TaskDao {
     @Query("SELECT * FROM tasks")
     suspend fun tasksOnce(): List<TaskItem>
 
+    @Query("SELECT * FROM tasks WHERE id = :id LIMIT 1")
+    suspend fun taskById(id: Long): TaskItem?
+
     @Update
     suspend fun update(task: TaskItem)
 
@@ -92,6 +95,9 @@ interface PlanDao {
     @Query("SELECT * FROM plan_blocks ORDER BY epochDay, startMin")
     suspend fun allOnce(): List<PlanBlock>
 
+    @Query("SELECT * FROM plan_blocks WHERE id = :id LIMIT 1")
+    suspend fun blockById(id: Long): PlanBlock?
+
     @Update
     suspend fun update(block: PlanBlock)
 
@@ -112,6 +118,138 @@ interface PlanDao {
 
     @Query("DELETE FROM plan_blocks")
     suspend fun clearPlans()
+}
+
+@Dao
+interface ChatDao {
+    // ── threads ──
+    @Query("SELECT * FROM chat_threads ORDER BY pinned DESC, updatedAt DESC")
+    fun threads(): Flow<List<ChatThread>>
+
+    @Query("SELECT * FROM chat_threads ORDER BY pinned DESC, updatedAt DESC")
+    suspend fun threadsOnce(): List<ChatThread>
+
+    @Query("SELECT * FROM chat_threads WHERE id = :id LIMIT 1")
+    suspend fun threadById(id: Long): ChatThread?
+
+    @Query("SELECT * FROM chat_threads ORDER BY updatedAt DESC LIMIT 1")
+    suspend fun mostRecentThread(): ChatThread?
+
+    @Insert
+    suspend fun insertThread(thread: ChatThread): Long
+
+    @Insert
+    suspend fun insertThreads(threads: List<ChatThread>)
+
+    @Update
+    suspend fun updateThread(thread: ChatThread)
+
+    @Query("UPDATE chat_threads SET draft = :draft WHERE id = :threadId")
+    suspend fun setDraft(threadId: Long, draft: String)
+
+    @Query("UPDATE chat_threads SET title = :title WHERE id = :threadId")
+    suspend fun setTitle(threadId: Long, title: String)
+
+    @Query("UPDATE chat_threads SET pinned = :pinned WHERE id = :threadId")
+    suspend fun setPinned(threadId: Long, pinned: Boolean)
+
+    @Query("UPDATE chat_threads SET mode = :mode, updatedAt = :at WHERE id = :threadId")
+    suspend fun setMode(threadId: Long, mode: String, at: Long)
+
+    @Query("UPDATE chat_threads SET updatedAt = :at WHERE id = :threadId")
+    suspend fun touchThread(threadId: Long, at: Long)
+
+    /** Deletes messages and links too, via ON DELETE CASCADE. */
+    @Query("DELETE FROM chat_threads WHERE id = :threadId")
+    suspend fun deleteThread(threadId: Long)
+
+    @Query("DELETE FROM chat_threads")
+    suspend fun clearThreads()
+
+    // ── messages ──
+    @Query("SELECT * FROM chat_messages WHERE threadId = :threadId ORDER BY createdAt, id")
+    fun messagesFor(threadId: Long): Flow<List<ChatMessage>>
+
+    @Query("SELECT * FROM chat_messages WHERE threadId = :threadId ORDER BY createdAt, id")
+    suspend fun messagesForOnce(threadId: Long): List<ChatMessage>
+
+    @Query("SELECT * FROM chat_messages ORDER BY createdAt, id")
+    suspend fun allMessagesOnce(): List<ChatMessage>
+
+    @Query("SELECT COUNT(*) FROM chat_messages WHERE threadId = :threadId")
+    suspend fun messageCount(threadId: Long): Int
+
+    @Insert
+    suspend fun insertMessage(message: ChatMessage): Long
+
+    @Insert
+    suspend fun insertMessages(messages: List<ChatMessage>)
+
+    @Query("UPDATE chat_messages SET inContext = :inContext WHERE id = :messageId")
+    suspend fun setInContext(messageId: Long, inContext: Boolean)
+
+    @Query("UPDATE chat_messages SET inContext = 0 WHERE threadId = :threadId")
+    suspend fun clearContextFor(threadId: Long)
+
+    @Query("DELETE FROM chat_messages WHERE id IN (:ids)")
+    suspend fun deleteMessages(ids: List<Long>)
+
+    /** Clears a thread's messages but keeps the thread itself — distinct from delete. */
+    @Query("DELETE FROM chat_messages WHERE threadId = :threadId")
+    suspend fun clearMessagesFor(threadId: Long)
+
+    /** Thread ids whose title or any message text matches. */
+    @Query(
+        "SELECT DISTINCT t.id FROM chat_threads t " +
+            "LEFT JOIN chat_messages m ON m.threadId = t.id " +
+            "WHERE t.title LIKE '%' || :q || '%' OR m.text LIKE '%' || :q || '%'"
+    )
+    suspend fun searchThreadIds(q: String): List<Long>
+
+    // ── links ──
+    @Query("SELECT * FROM message_links WHERE messageId IN (:messageIds)")
+    fun linksForMessages(messageIds: List<Long>): Flow<List<MessageLink>>
+
+    @Query(
+        "SELECT l.* FROM message_links l " +
+            "INNER JOIN chat_messages m ON m.id = l.messageId WHERE m.threadId = :threadId"
+    )
+    fun linksForThread(threadId: Long): Flow<List<MessageLink>>
+
+    @Query("SELECT * FROM message_links")
+    suspend fun allLinksOnce(): List<MessageLink>
+
+    @Insert
+    suspend fun insertLink(link: MessageLink): Long
+
+    @Insert
+    suspend fun insertLinks(links: List<MessageLink>)
+
+    // ── attachments ──
+    @Query("SELECT * FROM attachments WHERE ownerType = :ownerType AND ownerId = :ownerId")
+    suspend fun attachmentsFor(ownerType: String, ownerId: Long): List<Attachment>
+
+    @Query(
+        "SELECT a.* FROM attachments a " +
+            "INNER JOIN chat_messages m ON m.id = a.ownerId " +
+            "WHERE a.ownerType = 'message' AND m.threadId = :threadId"
+    )
+    fun attachmentsForThread(threadId: Long): Flow<List<Attachment>>
+
+    @Query("SELECT * FROM attachments")
+    suspend fun allAttachmentsOnce(): List<Attachment>
+
+    @Insert
+    suspend fun insertAttachment(attachment: Attachment): Long
+
+    @Insert
+    suspend fun insertAttachments(attachments: List<Attachment>)
+
+    @Query("DELETE FROM attachments WHERE ownerType = :ownerType AND ownerId IN (:ownerIds)")
+    suspend fun deleteAttachmentsFor(ownerType: String, ownerIds: List<Long>)
+
+    @Query("DELETE FROM attachments")
+    suspend fun clearAttachments()
 }
 
 @Dao

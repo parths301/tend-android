@@ -1,7 +1,10 @@
 package com.tend.app.data.backup
 
+import com.tend.app.data.db.ChatMessage
+import com.tend.app.data.db.ChatThread
 import com.tend.app.data.db.Habit
 import com.tend.app.data.db.HabitLog
+import com.tend.app.data.db.MessageLink
 import com.tend.app.data.db.NoteEntry
 import com.tend.app.data.db.PlanBlock
 import com.tend.app.data.db.TaskItem
@@ -31,8 +34,13 @@ data class BackupSnapshot(
     val plans: List<PlanBlock>,
     val notes: List<NoteEntry>,
     val settings: BackupSettings?,
+    val threads: List<ChatThread> = emptyList(),
+    val messages: List<ChatMessage> = emptyList(),
+    val links: List<MessageLink> = emptyList(),
 ) {
-    val rowCount: Int get() = habits.size + logs.size + tasks.size + plans.size + notes.size
+    val rowCount: Int
+        get() = habits.size + logs.size + tasks.size + plans.size + notes.size +
+            threads.size + messages.size
 }
 
 class BackupFormatException(message: String) : Exception(message)
@@ -48,7 +56,14 @@ class BackupFormatException(message: String) : Exception(message)
 object BackupFormat {
 
     const val FORMAT = "tend-backup"
-    const val VERSION = 1
+
+    /**
+     * v2 adds chat threads, messages and entity links.
+     *
+     * Readers still accept v1 — the chat arrays are simply absent and default to
+     * empty — so a backup taken before this release restores unchanged.
+     */
+    const val VERSION = 2
     const val MIME = "application/json"
     const val FILE_PREFIX = "tend-backup-"
     const val FILE_SUFFIX = ".json"
@@ -67,7 +82,9 @@ object BackupFormat {
                 .put("habitLogs", snapshot.logs.size)
                 .put("tasks", snapshot.tasks.size)
                 .put("planBlocks", snapshot.plans.size)
-                .put("notes", snapshot.notes.size),
+                .put("notes", snapshot.notes.size)
+                .put("chatThreads", snapshot.threads.size)
+                .put("chatMessages", snapshot.messages.size),
         )
 
         root.put(
@@ -131,6 +148,48 @@ object BackupFormat {
                 put("habitId", it.habitId)
                 put("timestamp", it.timestamp)
                 put("text", it.text)
+            },
+        )
+
+        // Chat. Attachments are referenced by content:// URI and live outside the
+        // app, so they are deliberately not inlined here — a backup stays a
+        // readable text file rather than a container of encoded blobs.
+        root.put(
+            "chatThreads",
+            snapshot.threads.jsonArray {
+                put("id", it.id)
+                put("title", it.title)
+                put("createdAt", it.createdAt)
+                put("updatedAt", it.updatedAt)
+                put("mode", it.mode)
+                put("pinned", it.pinned)
+                put("draft", it.draft)
+            },
+        )
+
+        root.put(
+            "chatMessages",
+            snapshot.messages.jsonArray {
+                put("id", it.id)
+                put("threadId", it.threadId)
+                put("fromAi", it.fromAi)
+                put("text", it.text)
+                put("createdAt", it.createdAt)
+                put("source", it.source)
+                put("modelId", it.modelId ?: JSONObject.NULL)
+                put("inContext", it.inContext)
+            },
+        )
+
+        root.put(
+            "messageLinks",
+            snapshot.links.jsonArray {
+                put("id", it.id)
+                put("messageId", it.messageId)
+                put("entityType", it.entityType)
+                put("entityId", it.entityId)
+                put("label", it.label)
+                put("createdAt", it.createdAt)
             },
         )
 
@@ -231,6 +290,40 @@ object BackupFormat {
                     text = it.optString("text", ""),
                 )
             },
+            // Absent in v1 files; `rows` yields an empty list, which is correct.
+            threads = root.rows("chatThreads") {
+                ChatThread(
+                    id = it.getLong("id"),
+                    title = it.optString("title", "Chat"),
+                    createdAt = it.optLong("createdAt", 0L),
+                    updatedAt = it.optLong("updatedAt", 0L),
+                    mode = it.optString("mode", "ai"),
+                    pinned = it.optBoolean("pinned", false),
+                    draft = it.optString("draft", ""),
+                )
+            },
+            messages = root.rows("chatMessages") {
+                ChatMessage(
+                    id = it.getLong("id"),
+                    threadId = it.getLong("threadId"),
+                    fromAi = it.optBoolean("fromAi", false),
+                    text = it.optString("text", ""),
+                    createdAt = it.optLong("createdAt", 0L),
+                    source = it.optString("source", "system"),
+                    modelId = it.optStringOrNull("modelId"),
+                    inContext = it.optBoolean("inContext", false),
+                )
+            },
+            links = root.rows("messageLinks") {
+                MessageLink(
+                    id = it.getLong("id"),
+                    messageId = it.getLong("messageId"),
+                    entityType = it.optString("entityType", ""),
+                    entityId = it.getLong("entityId"),
+                    label = it.optString("label", ""),
+                    createdAt = it.optLong("createdAt", 0L),
+                )
+            },
             settings = root.optJSONObject("settings")?.let { s ->
                 BackupSettings(
                     heatmapWeeks = s.optInt("heatmapWeeks", 17),
@@ -270,18 +363,41 @@ object BackupFormat {
      * zeroes every child row's primary key so Room assigns fresh ones. Only
      * habit ids survive as-is, because logs and notes point at them.
      */
+    /**
+     * Drops rows that point at something absent, and keeps primary keys.
+     *
+     * Keys are preserved rather than regenerated because restore clears the
+     * tables first, so there is nothing to collide with — and because
+     * `message_links` records the id of the task or plan a chat message created.
+     * Regenerating those ids (as this did before chat existed) would silently
+     * turn every restored chip into a dead link.
+     */
     fun sanitize(snapshot: BackupSnapshot): BackupSnapshot {
         val habits = snapshot.habits.distinctBy { it.id }
         val habitIds = habits.map { it.id }.toSet()
+
+        val threads = snapshot.threads.distinctBy { it.id }
+        val threadIds = threads.map { it.id }.toSet()
+        val messages = snapshot.messages
+            .distinctBy { it.id }
+            .filter { it.threadId in threadIds }
+        val messageIds = messages.map { it.id }.toSet()
+
         return snapshot.copy(
             habits = habits,
             logs = snapshot.logs
                 .filter { it.habitId in habitIds }
                 .distinctBy { it.habitId to it.epochDay }
                 .map { it.copy(id = 0) },
-            tasks = snapshot.tasks.map { it.copy(id = 0) },
-            plans = snapshot.plans.map { it.copy(id = 0) },
+            tasks = snapshot.tasks.distinctBy { it.id },
+            plans = snapshot.plans.distinctBy { it.id },
             notes = snapshot.notes.filter { it.habitId in habitIds }.map { it.copy(id = 0) },
+            threads = threads,
+            messages = messages,
+            // A link whose message is gone has nothing to render against. A link
+            // whose *entity* is gone is kept on purpose — that is the deleted-item
+            // case the chat is designed to report.
+            links = snapshot.links.filter { it.messageId in messageIds },
         )
     }
 
@@ -302,6 +418,9 @@ object BackupFormat {
     private fun JSONObject.optIntOrNull(key: String): Int? = if (isNull(key)) null else optInt(key)
 
     private fun JSONObject.optLongOrNull(key: String): Long? = if (isNull(key)) null else optLong(key)
+
+    private fun JSONObject.optStringOrNull(key: String): String? =
+        if (isNull(key)) null else optString(key).takeIf { it.isNotEmpty() }
 
     // Named to avoid org.json's own putOpt(String, Object), which drops nulls
     // silently — here a null is written explicitly so the field stays visible

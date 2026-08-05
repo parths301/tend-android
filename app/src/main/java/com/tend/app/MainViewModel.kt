@@ -12,6 +12,7 @@ import com.tend.app.ai.ModelOption
 import com.tend.app.ai.OpenRouterCatalog
 import com.tend.app.data.CalEvent
 import com.tend.app.data.CalendarRepository
+import com.tend.app.data.ChatRepository
 import com.tend.app.data.SettingsRepository
 import com.tend.app.data.TendRepository
 import com.tend.app.data.backup.BackupFormat
@@ -20,12 +21,23 @@ import com.tend.app.data.backup.BackupScheduler
 import com.tend.app.data.backup.BackupSnapshot
 import com.tend.app.data.backup.readableMessage
 import com.tend.app.data.db.AppDatabase
+import com.tend.app.data.db.ChatMessage
+import com.tend.app.data.db.ChatThread
 import com.tend.app.data.db.Habit
 import com.tend.app.data.db.HabitLog
+import com.tend.app.data.db.MessageLink
 import com.tend.app.data.db.NoteEntry
 import com.tend.app.data.db.PlanBlock
 import com.tend.app.data.db.TaskItem
 import com.tend.app.domain.Streaks
+import com.tend.app.domain.chat.ActionApplier
+import com.tend.app.domain.chat.AiExecutionRouter
+import com.tend.app.domain.chat.ChatMode
+import com.tend.app.domain.chat.CloudAssistantEngine
+import com.tend.app.domain.chat.CloudCredentials
+import com.tend.app.domain.chat.EntityRef
+import com.tend.app.domain.chat.LocalAssistantEngine
+import com.tend.app.domain.chat.ResponseSource
 import com.tend.app.notif.Notifications
 import com.tend.app.notif.ReminderScheduler
 import com.tend.app.widget.TendWidgets
@@ -44,6 +56,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -67,7 +80,21 @@ data class HabitUi(
     val rate30: Int,
 )
 
-data class ChatMsg(val fromAi: Boolean, val text: String)
+/**
+ * A chat message joined with what it created.
+ *
+ * The links come from `message_links`, not from parsing the reply text, so a
+ * chip always knows exactly which row it points at.
+ */
+data class ChatMsgUi(
+    val message: ChatMessage,
+    val links: List<EntityRef> = emptyList(),
+) {
+    val fromAi: Boolean get() = message.fromAi
+    val text: String get() = message.text
+    val source: ResponseSource get() = ResponseSource.from(message.source)
+    val inContext: Boolean get() = message.inContext
+}
 
 /** Models available to the saved key, fetched from the provider. */
 /**
@@ -129,12 +156,16 @@ data class PendingRestore(
     val warnings: List<String>,
 )
 
+/** How much of the screen the chat is using. Same state, same composables. */
+enum class ChatSize { Sheet, FullScreen }
+
 data class Shell(
     val tab: Tab = Tab.Today,
     val view: HabitView = HabitView.Grid,
     val filter: String = "All",
     val aiOpen: Boolean = false,
     val aiThinking: Boolean = false,
+    val chatSize: ChatSize = ChatSize.Sheet,
     val detailHabitId: Long = 1L,
     val planDay: Long = LocalDate.now().toEpochDay(),
 )
@@ -143,9 +174,23 @@ data class Shell(
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = TendRepository(AppDatabase.get(app))
+    private val chatRepo = ChatRepository(AppDatabase.get(app))
     val settings = SettingsRepository(app)
     private val calendar = CalendarRepository(app)
     private val ai = AiClient()
+
+    /**
+     * The one dispatcher for chat turns.
+     *
+     * Both engines and the action applier are wired once, here, so nothing
+     * downstream can accidentally take a different route: `sendAi` has no branch
+     * on mode at all.
+     */
+    private val router = AiExecutionRouter(
+        cloud = CloudAssistantEngine(ai) { resolveCredentials() },
+        local = LocalAssistantEngine(),
+        applier = ActionApplier { applyAction(it) },
+    )
 
     val todayDate: LocalDate = LocalDate.now()
     val today: Long = todayDate.toEpochDay()
@@ -153,8 +198,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val shellState = MutableStateFlow(Shell())
     val shell: StateFlow<Shell> = shellState.asStateFlow()
 
-    private val chatState = MutableStateFlow<List<ChatMsg>>(emptyList())
-    val chat: StateFlow<List<ChatMsg>> = chatState.asStateFlow()
+    // ── chat ────────────────────────────────────────────────────
+    // The active thread is an id, and everything else is derived from Room. The
+    // list is never held in memory as the source of truth, which is what made
+    // the old chat vanish on process death.
+
+    private val activeThreadState = MutableStateFlow(0L)
+    val activeThread: StateFlow<Long> = activeThreadState.asStateFlow()
+
+    val threads: StateFlow<List<ChatThread>> =
+        chatRepo.threads().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val messagesFlow: StateFlow<List<ChatMessage>> =
+        activeThreadState
+            .flatMapLatest { id -> if (id == 0L) flowOf(emptyList()) else chatRepo.messages(id) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val linksFlow: StateFlow<List<MessageLink>> =
+        activeThreadState
+            .flatMapLatest { id -> if (id == 0L) flowOf(emptyList()) else chatRepo.links(id) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val chat: StateFlow<List<ChatMsgUi>> =
+        combine(messagesFlow, linksFlow) { messages, links ->
+            val byMessage = links.groupBy { it.messageId }
+            messages.map { message ->
+                ChatMsgUi(
+                    message = message,
+                    links = byMessage[message.id].orEmpty().mapNotNull { link ->
+                        EntityRef.Type.from(link.entityType)?.let {
+                            EntityRef(it, link.entityId, link.label)
+                        }
+                    },
+                )
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Composer text, held here rather than in the composable because
+     * `key(shell.tab)` in TendApp destroys screen state on every tab change —
+     * expanding the sheet to full screen would otherwise wipe what you typed.
+     */
+    private val draftState = MutableStateFlow("")
+    val draft: StateFlow<String> = draftState.asStateFlow()
+
+    /** Messages ticked for a bulk action. Transient by design; not persisted. */
+    private val selectionState = MutableStateFlow<Set<Long>>(emptySet())
+    val selection: StateFlow<Set<Long>> = selectionState.asStateFlow()
+
 
     val habits: StateFlow<List<HabitUi>> =
         combine(repo.habits(), repo.logs()) { habitList, allLogs ->
@@ -259,6 +350,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val modelsState = MutableStateFlow(ModelsUi())
     val models: StateFlow<ModelsUi> = modelsState.asStateFlow()
+
+    /** The mode the user picked. Declared after [apiKey] because it reads it. */
+    val chatMode: StateFlow<ChatMode> =
+        settings.chatMode.stateIn(viewModelScope, SharingStarted.Eagerly, ChatMode.Ai)
+
+    /**
+     * What the pipeline will actually do. AI mode without a key is offline mode,
+     * and the UI shows this rather than the raw selection so the toggle can never
+     * claim a state the pipeline isn't in.
+     */
+    val effectiveChatMode: StateFlow<ChatMode> =
+        combine(chatMode, apiKey) { selected, key -> ChatMode.effective(selected, key.isNotBlank()) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, ChatMode.Local)
 
     /**
      * One-shot celebration events. A SharedFlow with replay 0, so rotating the
@@ -648,7 +752,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 BackupManager.restore(getApplication(), pending.snapshot)
                 repo.materializeHabitBlocks(today)
                 shellState.update { it.copy(tab = Tab.Today, detailHabitId = 1L) }
-                chatState.value = emptyList()
+                // Re-resolve rather than wipe: a restore replaces the chat tables
+                // too, and the old id may not exist in the restored data.
+                activeThreadState.value = 0L
+                draftState.value = ""
+                selectionState.value = emptySet()
                 backupMessageState.value =
                     BackupMessage("Restored ${pending.snapshot.rowCount} entries.", failed = false)
             } catch (e: Exception) {
@@ -761,89 +869,266 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
 
     // ── Ask Tend ────────────────────────────────────────────────
+
     fun openAi() {
-        if (chatState.value.isEmpty()) {
-            val done = habits.value.count { it.doneToday }
-            val total = habits.value.size
-            val open = tasks.value.count { !it.done }
-            val star = habits.value.maxByOrNull { it.streak }
-            val starText = star?.let { " — ${it.habit.name} is at a ${it.streak}-day streak" } ?: ""
-            chatState.value = listOf(
-                ChatMsg(true, "Good morning. ${total - done} habits and $open open tasks left today$starText. What should I set up?")
-            )
+        viewModelScope.launch {
+            val threadId = ensureThread()
+            if (chatRepo.historyFor(threadId).isEmpty()) greet(threadId)
+            shellState.update { it.copy(aiOpen = true) }
         }
-        shellState.update { it.copy(aiOpen = true) }
     }
 
-    fun closeAi() = shellState.update { it.copy(aiOpen = false) }
+    fun closeAi() {
+        persistDraft()
+        shellState.update { it.copy(aiOpen = false, chatSize = ChatSize.Sheet) }
+    }
 
-    private fun push(msg: ChatMsg) = chatState.update { it + msg }
+    fun expandChat() = shellState.update { it.copy(chatSize = ChatSize.FullScreen) }
+
+    fun collapseChat() = shellState.update { it.copy(chatSize = ChatSize.Sheet) }
+
+    /** Resolves the thread to work in, creating one on first use. */
+    private suspend fun ensureThread(): Long {
+        activeThreadState.value.takeIf { it != 0L }?.let { return it }
+        val id = chatRepo.mostRecentOrNew(chatMode.value)
+        activeThreadState.value = id
+        draftState.value = chatRepo.threadById(id)?.draft.orEmpty()
+        return id
+    }
+
+    private suspend fun greet(threadId: Long) {
+        val done = habits.value.count { it.doneToday }
+        val total = habits.value.size
+        val open = tasks.value.count { !it.done }
+        val star = habits.value.maxByOrNull { it.streak }
+        val starText = star?.let { " — ${it.habit.name} is at a ${it.streak}-day streak" } ?: ""
+        chatRepo.append(
+            threadId = threadId,
+            fromAi = true,
+            text = "Good morning. ${total - done} habits and $open open tasks left today$starText. What should I set up?",
+            source = ResponseSource.System,
+        )
+    }
 
     fun sendAi(text: String) {
         val input = text.trim()
         if (input.isEmpty() || shellState.value.aiThinking) return
-        push(ChatMsg(false, input))
         shellState.update { it.copy(aiThinking = true) }
         viewModelScope.launch {
             try {
-                val key = apiKey.value
-                // With a key: use the real model, and surface failures instead of
-                // silently degrading to the offline rules (which can misfile things).
-                val result = if (key.isNotBlank()) {
-                    runRemote(provider.value, key) ?: return@launch
-                } else {
-                    delay(550)
-                    AiProtocol.simulate(input)
-                }
-                result.actions.forEach { apply(it) }
-                push(ChatMsg(true, result.reply))
+                val threadId = ensureThread()
+                // History is read before the new message is stored, so the policy
+                // never has to exclude the turn it belongs to.
+                val history = chatRepo.historyFor(threadId)
+                draftState.value = ""
+                chatRepo.saveDraft(threadId, "")
+                chatRepo.append(threadId, fromAi = false, text = input, source = ResponseSource.System)
+
+                val request = AiExecutionRouter.buildRequest(
+                    threadId = threadId,
+                    selectedMode = chatMode.value,
+                    hasKey = apiKey.value.isNotBlank(),
+                    history = history,
+                    userMessage = input,
+                    stateSummary = stateSummary(),
+                )
+                chatRepo.setMode(threadId, request.mode)
+
+                // Offline used to fake latency so the reply didn't appear
+                // instantly; the rules are still instant, so keep that beat.
+                if (request.mode == ChatMode.Local) delay(LOCAL_THINK_MS)
+
+                val response = withContext(Dispatchers.IO) { router.run(request) }
+                chatRepo.append(
+                    threadId = threadId,
+                    fromAi = true,
+                    text = response.reply,
+                    source = response.source,
+                    modelId = response.modelId,
+                    links = response.links,
+                )
             } finally {
                 shellState.update { it.copy(aiThinking = false) }
             }
         }
     }
 
-    private suspend fun runRemote(aiProvider: String, key: String): com.tend.app.ai.AiResult? =
-        withContext(Dispatchers.IO) {
-            try {
-                val history = chatState.value.map { it.fromAi to it.text }
-                // If the model list is loaded and the saved model isn't in it (retired
-                // or filtered out as unstable), fall back to a working one for this call
-                // and persist the correction.
-                val loaded = modelsState.value.ids
-                val effectiveModel = when {
-                    loaded.isEmpty() || model.value in loaded -> model.value
-                    else -> (loaded.firstOrNull { it == SettingsRepository.defaultModel(aiProvider) }
-                        ?: loaded.first()).also { settings.setModel(it) }
-                }
-                val raw = ai.complete(aiProvider, key, effectiveModel, AiProtocol.systemPrompt(stateSummary()), history)
-                AiProtocol.parse(raw) ?: com.tend.app.ai.AiResult(raw.take(500), emptyList())
-            } catch (e: Exception) {
-                val label = SettingsRepository.providerLabel(aiProvider)
-                push(
-                    ChatMsg(
-                        true,
-                        "$label request failed: ${e.message?.take(120) ?: "network error"}. " +
-                            "Check your key and model in Settings, then try again."
-                    )
-                )
-                null
-            }
+    /**
+     * Credentials for a cloud turn, including the healing step: if the saved
+     * model is no longer in the fetched list (retired, or filtered out), swap in
+     * a working one for this call and persist the correction.
+     */
+    private suspend fun resolveCredentials(): CloudCredentials? {
+        val key = apiKey.value
+        if (key.isBlank()) return null
+        val aiProvider = provider.value
+        val loaded = modelsState.value.ids
+        val effectiveModel = when {
+            loaded.isEmpty() || model.value in loaded -> model.value
+            else -> (loaded.firstOrNull { it == SettingsRepository.defaultModel(aiProvider) }
+                ?: loaded.first()).also { settings.setModel(it) }
         }
+        return CloudCredentials(aiProvider, key, effectiveModel)
+    }
 
-    private suspend fun apply(action: AiAction) {
-        when (action) {
-            is AiAction.AddTask -> {
-                repo.addTask(action.title, action.group)
-                ReminderScheduler.reschedule(getApplication())
-            }
-            is AiAction.AddPlanBlock ->
-                repo.addPlanBlock(today, action.startMin, action.startMin + action.durationMin, action.title, action.kind)
-            is AiAction.AddHabit -> {
-                repo.addHabit(action.name, action.category, action.goal, createdDay = today)
-                TendWidgets.refresh(getApplication())
+    /**
+     * Creates what the assistant asked for and reports back what it made.
+     *
+     * The row ids were always available — the DAOs return them — they were just
+     * being dropped. Returning an [EntityRef] is the whole of what makes a chat
+     * message's chips clickable, and it happens on one path, so offline mode
+     * links entities exactly as cloud mode does.
+     */
+    private suspend fun applyAction(action: AiAction): EntityRef? = when (action) {
+        is AiAction.AddTask -> {
+            val id = repo.addTask(action.title, action.group)
+            ReminderScheduler.reschedule(getApplication())
+            EntityRef(EntityRef.Type.Task, id, action.title)
+        }
+        is AiAction.AddPlanBlock -> {
+            val id = repo.addPlanBlock(
+                today, action.startMin, action.startMin + action.durationMin, action.title, action.kind,
+            )
+            EntityRef(EntityRef.Type.Plan, id, action.title)
+        }
+        is AiAction.AddHabit -> {
+            val id = repo.addHabit(action.name, action.category, action.goal, createdDay = today)
+            TendWidgets.refresh(getApplication())
+            EntityRef(EntityRef.Type.Habit, id, action.name)
+        }
+    }
+
+    // ── chat management ─────────────────────────────────────────
+
+    fun setChatMode(mode: ChatMode) {
+        viewModelScope.launch { settings.setChatMode(mode) }
+    }
+
+    fun setDraft(text: String) {
+        draftState.value = text
+    }
+
+    /** Drafts are per thread, so they survive switching away and back. */
+    private fun persistDraft() {
+        val threadId = activeThreadState.value
+        if (threadId == 0L) return
+        val text = draftState.value
+        viewModelScope.launch { chatRepo.saveDraft(threadId, text) }
+    }
+
+    fun newChat() {
+        persistDraft()
+        viewModelScope.launch {
+            selectionState.value = emptySet()
+            draftState.value = ""
+            val id = chatRepo.newThread(chatMode.value)
+            activeThreadState.value = id
+            greet(id)
+        }
+    }
+
+    fun openThread(threadId: Long) {
+        if (threadId == activeThreadState.value) return
+        persistDraft()
+        viewModelScope.launch {
+            selectionState.value = emptySet()
+            activeThreadState.value = threadId
+            draftState.value = chatRepo.threadById(threadId)?.draft.orEmpty()
+        }
+    }
+
+    /** Empties the current thread but keeps it — distinct from [deleteThread]. */
+    fun clearChat() {
+        val threadId = activeThreadState.value.takeIf { it != 0L } ?: return
+        viewModelScope.launch {
+            selectionState.value = emptySet()
+            chatRepo.clearMessages(threadId)
+            greet(threadId)
+        }
+    }
+
+    fun deleteThread(threadId: Long) {
+        viewModelScope.launch {
+            chatRepo.deleteThread(threadId)
+            if (threadId == activeThreadState.value) {
+                selectionState.value = emptySet()
+                draftState.value = ""
+                // Fall back to whatever is left rather than showing an empty shell.
+                activeThreadState.value = 0L
+                val id = ensureThread()
+                if (chatRepo.historyFor(id).isEmpty()) greet(id)
             }
         }
+    }
+
+    fun renameThread(threadId: Long, title: String) {
+        viewModelScope.launch { chatRepo.renameThread(threadId, title) }
+    }
+
+    fun setThreadPinned(threadId: Long, pinned: Boolean) {
+        viewModelScope.launch { chatRepo.setPinned(threadId, pinned) }
+    }
+
+    // ── message actions ─────────────────────────────────────────
+
+    fun toggleSelected(messageId: Long) = selectionState.update { current ->
+        if (messageId in current) current - messageId else current + messageId
+    }
+
+    fun clearSelection() {
+        selectionState.value = emptySet()
+    }
+
+    /**
+     * Deletes messages only. Anything they created stays: a task still on the
+     * user's list must not disappear because they tidied the conversation.
+     */
+    fun deleteSelectedMessages() {
+        val ids = selectionState.value.toList()
+        if (ids.isEmpty()) return
+        selectionState.value = emptySet()
+        viewModelScope.launch { chatRepo.deleteMessages(ids) }
+    }
+
+    fun deleteMessage(messageId: Long) {
+        selectionState.update { it - messageId }
+        viewModelScope.launch { chatRepo.deleteMessages(listOf(messageId)) }
+    }
+
+    /** Marks a message as context for offline mode. */
+    fun toggleInContext(messageId: Long) {
+        val current = messagesFlow.value.firstOrNull { it.id == messageId } ?: return
+        viewModelScope.launch { chatRepo.setInContext(messageId, !current.inContext) }
+    }
+
+    fun clearChatContext() {
+        val threadId = activeThreadState.value.takeIf { it != 0L } ?: return
+        viewModelScope.launch { chatRepo.clearContext(threadId) }
+    }
+
+    /**
+     * Opens whatever a chat chip points at.
+     *
+     * Returns false when the row is gone, so the caller can say so rather than
+     * navigating to a blank screen.
+     */
+    suspend fun resolveLink(ref: EntityRef): Boolean = when (ref.type) {
+        EntityRef.Type.Habit -> repo.habitById(ref.id)?.let {
+            shellState.update { s -> s.copy(tab = Tab.Detail, detailHabitId = ref.id, aiOpen = false) }
+            true
+        } ?: false
+
+        EntityRef.Type.Task -> repo.taskById(ref.id)?.let {
+            shellState.update { s -> s.copy(tab = Tab.Tasks, aiOpen = false) }
+            true
+        } ?: false
+
+        EntityRef.Type.Plan -> repo.planBlockById(ref.id)?.let { block ->
+            shellState.update { s ->
+                s.copy(tab = Tab.Plan, planDay = block.epochDay, aiOpen = false)
+            }
+            true
+        } ?: false
     }
 
     private fun stateSummary(): String {
@@ -856,65 +1141,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── suggestion chips (canned offline flows) ─────────────────
-    fun chipPlanMorning() {
+    // These answer locally without consulting an engine, so they are stamped
+    // System rather than Local: nothing inferred them from the user's words.
+
+    private fun chipTurn(prompt: String, work: suspend (Long) -> String) {
         if (shellState.value.aiThinking) return
-        push(ChatMsg(false, "Plan my morning"))
         shellState.update { it.copy(aiThinking = true) }
         viewModelScope.launch {
             try {
-                delay(550)
-                val title = "Inbox zero + admin"
-                val added = if (!repo.hasPlanBlock(today, title)) {
-                    repo.addPlanBlock(today, 11 * 60, 11 * 60 + 45, title, kind = "focus")
-                    true
-                } else {
-                    false
-                }
-                push(
-                    ChatMsg(
-                        true,
-                        if (added) "Done — I blocked \"$title\" at 11:00 for 45 minutes. Check the Plan tab."
-                        else "\"$title\" is already on today's plan. Anything else to slot in?"
-                    )
-                )
+                val threadId = ensureThread()
+                chatRepo.append(threadId, fromAi = false, text = prompt, source = ResponseSource.System)
+                val reply = work(threadId)
+                chatRepo.append(threadId, fromAi = true, text = reply, source = ResponseSource.System)
             } finally {
                 shellState.update { it.copy(aiThinking = false) }
             }
         }
     }
 
-    fun chipAddTask() {
-        if (shellState.value.aiThinking) return
-        push(ChatMsg(false, "Add a task"))
-        viewModelScope.launch {
-            delay(450)
-            push(ChatMsg(true, "Sure — type it below. Try \"Add buy groceries at 5pm\" and I'll file it under the right group."))
+    fun chipPlanMorning() = chipTurn("Plan my morning") {
+        delay(LOCAL_THINK_MS)
+        val title = "Inbox zero + admin"
+        if (repo.hasPlanBlock(today, title)) {
+            "\"$title\" is already on today's plan. Anything else to slot in?"
+        } else {
+            repo.addPlanBlock(today, 11 * 60, 11 * 60 + 45, title, kind = "focus")
+            "Done — I blocked \"$title\" at 11:00 for 45 minutes. Check the Plan tab."
         }
     }
 
-    fun chipWeekSummary() {
-        if (shellState.value.aiThinking) return
-        push(ChatMsg(false, "How's my week?"))
-        viewModelScope.launch {
-            delay(550)
-            val habitList = habits.value
-            val total = habitList.size
-            val weekDays = (today - 6)..today
-            val possible = total * 7
-            val done = habitList.sumOf { h -> weekDays.count { it in h.doneDays } }
-            val pct = if (possible > 0) done * 100 / possible else 0
-            val star = habitList.maxByOrNull { it.streak }
-            val doneToday = habitList.count { it.doneToday }
-            val openTasks = tasks.value.count { !it.done }
-            push(
-                ChatMsg(
-                    true,
-                    "Solid week: $done of $possible check-ins ($pct%). " +
-                        (star?.let { "${it.habit.name} is on a ${it.streak}-day streak — personal best is ${it.best}. " } ?: "") +
-                        "Today you're at $doneToday of $total habits with $openTasks tasks left."
-                )
-            )
-        }
+    fun chipAddTask() = chipTurn("Add a task") {
+        delay(450)
+        "Sure — type it below. Try \"Add buy groceries at 5pm\" and I'll file it under the right group."
+    }
+
+    fun chipWeekSummary() = chipTurn("How's my week?") {
+        delay(LOCAL_THINK_MS)
+        val habitList = habits.value
+        val total = habitList.size
+        val weekDays = (today - 6)..today
+        val possible = total * 7
+        val done = habitList.sumOf { h -> weekDays.count { it in h.doneDays } }
+        val pct = if (possible > 0) done * 100 / possible else 0
+        val star = habitList.maxByOrNull { it.streak }
+        val doneToday = habitList.count { it.doneToday }
+        val openTasks = tasks.value.count { !it.done }
+        "Solid week: $done of $possible check-ins ($pct%). " +
+            (star?.let { "${it.habit.name} is on a ${it.streak}-day streak — personal best is ${it.best}. " } ?: "") +
+            "Today you're at $doneToday of $total habits with $openTasks tasks left."
     }
 
     private companion object {
@@ -926,5 +1200,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         /** How long to wait for a check-off to surface through Room before giving up. */
         const val WRITE_SETTLE_MS = 1_500L
+
+        /**
+         * Offline replies are instant. A short pause keeps the thinking bubble
+         * legible instead of the answer appearing before the question lands.
+         */
+        const val LOCAL_THINK_MS = 550L
     }
 }

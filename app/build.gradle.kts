@@ -7,6 +7,10 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 // Upload-key credentials live in keystore.properties, which is git-ignored.
 // Without it — CI, a fresh clone — the release build falls back to the debug
 // key so `assembleRelease` still runs; that APK just can't be published.

@@ -1,6 +1,7 @@
 package com.tend.app.data.db
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -59,4 +60,95 @@ data class NoteEntry(
     val habitId: Long,
     val timestamp: Long,         // epoch millis
     val text: String,
+)
+
+// ── chat ────────────────────────────────────────────────────────────────
+// Ask Tend used to be a list in memory. These four tables give it threads that
+// survive process death, a record of what each message created, and somewhere
+// for attachments to hang.
+
+/** One conversation. `draft` is the unsent composer text, kept per thread. */
+@Entity(tableName = "chat_threads")
+data class ChatThread(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val createdAt: Long,          // epoch millis
+    val updatedAt: Long,          // bumped on every message; drives recency order
+    val mode: String,             // ChatMode.stored — the mode this thread last ran in
+    val pinned: Boolean = false,
+    val draft: String = "",
+)
+
+@Entity(
+    tableName = "chat_messages",
+    foreignKeys = [
+        ForeignKey(
+            entity = ChatThread::class,
+            parentColumns = ["id"],
+            childColumns = ["threadId"],
+            onDelete = ForeignKey.CASCADE,
+        )
+    ],
+    indices = [Index(value = ["threadId"])],
+)
+data class ChatMessage(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val threadId: Long,
+    val fromAi: Boolean,
+    val text: String,
+    val createdAt: Long,
+    val source: String,           // ResponseSource.stored — "cloud" | "local" | "system"
+    val modelId: String? = null,  // what actually answered, for the "AI" tag
+    /** Manually marked "add to AI context" — only meaningful for Local Mode. */
+    val inContext: Boolean = false,
+    val personalityId: Long? = null,
+)
+
+/**
+ * Something a message created — a task, habit, plan block.
+ *
+ * Deliberately **not** a foreign key onto habits/tasks/plans. If the user later
+ * deletes the task, the reference must survive so the chat can say "this task
+ * was deleted" instead of the chip silently disappearing. Resolution happens at
+ * render time against the live tables.
+ */
+@Entity(
+    tableName = "message_links",
+    foreignKeys = [
+        ForeignKey(
+            entity = ChatMessage::class,
+            parentColumns = ["id"],
+            childColumns = ["messageId"],
+            onDelete = ForeignKey.CASCADE,
+        )
+    ],
+    indices = [Index(value = ["messageId"])],
+)
+data class MessageLink(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val messageId: Long,
+    val entityType: String,       // EntityRef.Type.stored — "task" | "habit" | "plan"
+    val entityId: Long,
+    val label: String,            // snapshot of the title at creation, for dead links
+    val createdAt: Long,
+)
+
+/**
+ * A file or image attached to something. `ownerType`/`ownerId` rather than a
+ * foreign key so chat messages, memory entries and habits can all share one
+ * table and one rendering primitive.
+ */
+@Entity(
+    tableName = "attachments",
+    indices = [Index(value = ["ownerType", "ownerId"])],
+)
+data class Attachment(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val ownerType: String,        // "message" | "memory"
+    val ownerId: Long,
+    val uri: String,              // SAF content:// URI, persisted permission taken
+    val mime: String,
+    val displayName: String,
+    val sizeBytes: Long,
+    val createdAt: Long,
 )

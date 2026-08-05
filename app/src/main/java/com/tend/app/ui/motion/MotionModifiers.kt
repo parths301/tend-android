@@ -4,7 +4,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.LaunchedEffect
@@ -29,10 +30,12 @@ import androidx.compose.ui.platform.LocalDensity
  * Interaction is never blocked: the click fires immediately, and the spring
  * just plays out behind it.
  */
+@OptIn(ExperimentalFoundationApi::class)
 fun Modifier.bouncyTap(
     haptic: TendHaptic = TendHaptic.Tap,
     pressedScale: Float = TendMotion.PressScale,
     enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ): Modifier = composed {
     val haptics = LocalTendHaptics.current
@@ -51,10 +54,18 @@ fun Modifier.bouncyTap(
             scaleX = scale
             scaleY = scale
         }
-        .clickable(
+        .combinedClickable(
             interactionSource = interactionSource,
             indication = null,
             enabled = enabled,
+            onLongClick = onLongClick?.let {
+                {
+                    // A long press is a heavier commitment than a tap, and the
+                    // buzz is the only signal it fired before the finger lifts.
+                    haptics.perform(TendHaptic.Confirm)
+                    it()
+                }
+            },
         ) {
             haptics.perform(haptic)
             onClick()

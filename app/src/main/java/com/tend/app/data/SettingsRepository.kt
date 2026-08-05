@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tend.app.data.backup.BackupSettings
+import com.tend.app.domain.chat.ChatMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +27,7 @@ class SettingsRepository(context: Context) {
 
     private val heatmapWeeksKey = intPreferencesKey("heatmap_weeks")
     private val showAiBarKey = booleanPreferencesKey("show_ai_bar")
+    private val chatModeKey = stringPreferencesKey("chat_mode")
     private val providerKey = stringPreferencesKey("ai_provider")
     private val customCategoriesKey = stringSetPreferencesKey("custom_categories")
     private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
@@ -52,6 +54,8 @@ class SettingsRepository(context: Context) {
 
     val heatmapWeeks: Flow<Int> = store.data.map { it[heatmapWeeksKey] ?: 17 }
     val showAiBar: Flow<Boolean> = store.data.map { it[showAiBarKey] ?: true }
+    /** The mode the user selected. What actually runs also depends on a key existing. */
+    val chatMode: Flow<ChatMode> = store.data.map { ChatMode.from(it[chatModeKey]) }
     val provider: Flow<String> = store.data.map { it[providerKey] ?: PROVIDER_GEMINI }
     val customCategories: Flow<List<String>> =
         store.data.map { (it[customCategoriesKey] ?: emptySet()).sorted() }
@@ -72,6 +76,10 @@ class SettingsRepository(context: Context) {
 
     suspend fun setShowAiBar(show: Boolean) {
         store.edit { it[showAiBarKey] = show }
+    }
+
+    suspend fun setChatMode(mode: ChatMode) {
+        store.edit { it[chatModeKey] = mode.stored }
     }
 
     suspend fun setProvider(provider: String) {
