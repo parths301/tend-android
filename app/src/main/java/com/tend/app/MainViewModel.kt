@@ -243,6 +243,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .flatMapLatest { id -> if (id == 0L) flowOf(emptyList()) else chatRepo.links(id) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val attachmentsFlow: StateFlow<List<Attachment>> =
+        activeThreadState
+            .flatMapLatest { id -> if (id == 0L) flowOf(emptyList()) else chatRepo.attachments(id) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val chat: StateFlow<List<ChatMsgUi>> =
         combine(messagesFlow, linksFlow, attachmentsFlow) { messages, links, attachments ->
             val linksByMessage = links.groupBy { it.messageId }
@@ -275,11 +280,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Files picked for the next message, alongside the draft. */
     private val pendingAttachmentsState = MutableStateFlow<List<PendingAttachment>>(emptyList())
     val pendingAttachments: StateFlow<List<PendingAttachment>> = pendingAttachmentsState.asStateFlow()
-
-    private val attachmentsFlow: StateFlow<List<Attachment>> =
-        activeThreadState
-            .flatMapLatest { id -> if (id == 0L) flowOf(emptyList()) else chatRepo.attachments(id) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
 
     val habits: StateFlow<List<HabitUi>> =
