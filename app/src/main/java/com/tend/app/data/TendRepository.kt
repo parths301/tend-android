@@ -60,12 +60,6 @@ class TendRepository(private val db: AppDatabase) {
         db.habitDao().upsertLog(log)
     }
 
-    // Single-row lookups, used to resolve chat links before navigating: a chip
-    // pointing at a deleted row must fail visibly rather than open a blank screen.
-    suspend fun habitById(id: Long): Habit? = db.habitDao().habitById(id)
-    suspend fun taskById(id: Long): TaskItem? = db.taskDao().taskById(id)
-    suspend fun planBlockById(id: Long): PlanBlock? = db.planDao().blockById(id)
-
     suspend fun toggleTask(task: TaskItem) = db.taskDao().update(task.copy(done = !task.done))
 
     suspend fun togglePlan(block: PlanBlock) = db.planDao().update(block.copy(done = !block.done))
@@ -77,6 +71,11 @@ class TendRepository(private val db: AppDatabase) {
     suspend fun updateHabit(habit: Habit) = db.habitDao().updateHabit(habit)
 
     suspend fun habitById(id: Long): Habit? = db.habitDao().habitById(id)
+
+    // Single-row lookups used to resolve chat links before navigating: a chip
+    // pointing at a deleted row must fail visibly rather than open a blank screen.
+    suspend fun taskById(id: Long): TaskItem? = db.taskDao().taskById(id)
+    suspend fun planBlockById(id: Long): PlanBlock? = db.planDao().blockById(id)
 
     suspend fun deleteTask(task: TaskItem) = db.taskDao().delete(task)
 
