@@ -56,9 +56,16 @@ class AiExecutionRouter(
             userMessage: String,
             stateSummary: String,
             personaFragment: String? = null,
+            customPrompt: String = "",
+            historyWindow: Int = ChatContextPolicy.DEFAULT_WINDOW,
         ): AssistantRequest {
             val mode = ChatMode.effective(selectedMode, hasKey)
-            val policy = mode.defaultPolicy
+            // The window is user-tunable, but only AI mode has history to window;
+            // offline's policy ignores it entirely.
+            val policy = when (mode) {
+                ChatMode.Ai -> ChatContextPolicy.FullHistory(historyWindow)
+                ChatMode.Local -> ChatContextPolicy.SelectedOnly
+            }
             return AssistantRequest(
                 threadId = threadId,
                 mode = mode,
@@ -70,6 +77,7 @@ class AiExecutionRouter(
                 // a future local model is ever swapped in.
                 stateSummary = if (mode == ChatMode.Ai) stateSummary else "",
                 personaFragment = personaFragment,
+                customPrompt = customPrompt,
             )
         }
     }

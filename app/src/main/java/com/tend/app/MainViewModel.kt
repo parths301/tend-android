@@ -36,6 +36,7 @@ import com.tend.app.data.db.PlanBlock
 import com.tend.app.data.db.TaskItem
 import com.tend.app.domain.Streaks
 import com.tend.app.domain.chat.ActionApplier
+import com.tend.app.domain.chat.AdvancedConfig
 import com.tend.app.domain.chat.AiExecutionRouter
 import com.tend.app.domain.chat.ChatMode
 import com.tend.app.domain.chat.CloudAssistantEngine
@@ -43,6 +44,7 @@ import com.tend.app.domain.chat.CloudCredentials
 import com.tend.app.domain.chat.EntityRef
 import com.tend.app.domain.chat.LocalAssistantEngine
 import com.tend.app.domain.chat.MemoryCommand
+import com.tend.app.domain.chat.Personality
 import com.tend.app.domain.chat.ResponseSource
 import com.tend.app.notif.Notifications
 import com.tend.app.notif.ReminderScheduler
@@ -381,6 +383,81 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val effectiveChatMode: StateFlow<ChatMode> =
         combine(chatMode, apiKey) { selected, key -> ChatMode.effective(selected, key.isNotBlank()) }
             .stateIn(viewModelScope, SharingStarted.Eagerly, ChatMode.Local)
+
+    // ── advanced config ─────────────────────────────────────────
+
+    val customPrompt: StateFlow<String> =
+        settings.customPrompt.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    val advancedJson: StateFlow<String> =
+        settings.advancedJson.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    val personalities: StateFlow<List<Personality>> =
+        settings.personalities.stateIn(viewModelScope, SharingStarted.Eagerly, Personality.Presets)
+
+    val activePersonality: StateFlow<Personality> =
+        settings.activePersonality.stateIn(viewModelScope, SharingStarted.Eagerly, Personality.Default)
+
+    fun setCustomPrompt(prompt: String) {
+        viewModelScope.launch { settings.setCustomPrompt(prompt) }
+    }
+
+    fun resetCustomPrompt() {
+        viewModelScope.launch { settings.setCustomPrompt("") }
+    }
+
+    /**
+     * Stores JSON config only if it passes validation, and reports the reason
+     * when it doesn't — so a malformed value never reaches the pipeline.
+     */
+    fun saveAdvancedJson(json: String): String? =
+        when (val result = AdvancedConfig.validate(json)) {
+            is AdvancedConfig.Validation.Ok -> {
+                viewModelScope.launch { settings.setAdvancedJson(json) }
+                null
+            }
+            is AdvancedConfig.Validation.Invalid -> result.message
+        }
+
+    fun resetAdvancedJson() {
+        viewModelScope.launch { settings.setAdvancedJson("") }
+    }
+
+    fun selectPersonality(id: Long) {
+        viewModelScope.launch { settings.setActivePersonality(id) }
+    }
+
+    fun savePersonality(personality: Personality) {
+        viewModelScope.launch {
+            val existing = personalities.value.filterNot { it.builtIn }
+            val merged = if (existing.any { it.id == personality.id }) {
+                existing.map { if (it.id == personality.id) personality else it }
+            } else {
+                existing + personality
+            }
+            settings.saveUserPersonalities(merged)
+        }
+    }
+
+    /** Copies a profile — including a built-in — into an editable one. */
+    fun duplicatePersonality(source: Personality) {
+        savePersonality(
+            source.copy(
+                id = System.currentTimeMillis(),
+                name = "${source.name} copy",
+                builtIn = false,
+            )
+        )
+    }
+
+    fun deletePersonality(id: Long) {
+        viewModelScope.launch {
+            settings.saveUserPersonalities(personalities.value.filterNot { it.builtIn || it.id == id })
+            // Deleting the active profile must not leave the pipeline pointing
+            // at something that no longer exists.
+            if (activePersonality.value.id == id) settings.setActivePersonality(Personality.Default.id)
+        }
+    }
 
     /**
      * One-shot celebration events. A SharedFlow with replay 0, so rotating the
@@ -955,6 +1032,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
 
+                val config = AdvancedConfig.load(advancedJson.value)
                 val request = AiExecutionRouter.buildRequest(
                     threadId = threadId,
                     selectedMode = chatMode.value,
@@ -962,12 +1040,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     history = history,
                     userMessage = input,
                     stateSummary = stateSummary(),
+                    personaFragment = activePersonality.value.fragment().takeIf { it.isNotBlank() },
+                    customPrompt = customPrompt.value,
+                    historyWindow = config.historyWindow,
                 )
                 chatRepo.setMode(threadId, request.mode)
 
                 // Offline used to fake latency so the reply didn't appear
                 // instantly; the rules are still instant, so keep that beat.
-                if (request.mode == ChatMode.Local) delay(LOCAL_THINK_MS)
+                if (request.mode == ChatMode.Local) delay(config.localThinkingMs)
 
                 val response = withContext(Dispatchers.IO) { router.run(request) }
                 chatRepo.append(

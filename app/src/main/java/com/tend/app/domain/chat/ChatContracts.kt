@@ -121,10 +121,16 @@ data class AssistantRequest(
     val contextMessages: List<ChatMessage>,
     val stateSummary: String,
     /**
-     * Extra system-prompt text from the active personality. Null until the user
-     * selects one; both engines honour it.
+     * Extra system-prompt text from the active personality. Null when the
+     * default personality says nothing; **both** engines honour it, so a
+     * personality is not an AI-only feature.
      */
     val personaFragment: String? = null,
+    /**
+     * The user's raw system-prompt override, empty when they haven't set one.
+     * Applied by the cloud engine; the offline rules have no prompt to override.
+     */
+    val customPrompt: String = "",
 )
 
 /**

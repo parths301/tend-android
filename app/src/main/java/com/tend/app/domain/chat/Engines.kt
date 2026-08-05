@@ -16,10 +16,27 @@ class LocalAssistantEngine : AssistantEngine {
     override suspend fun run(request: AssistantRequest): AssistantResponse {
         val result = AiProtocol.simulate(resolveInput(request))
         return AssistantResponse(
-            reply = result.reply,
+            // The personality reaches offline mode too. Without this, selecting
+            // "Brief" would visibly change nothing for a user with no API key —
+            // a setting that appears to work and doesn't.
+            reply = applyTone(result.reply, request.personaFragment),
             actions = result.actions,
             source = ResponseSource.Local,
         )
+    }
+
+    /**
+     * Shapes a canned reply to the active personality.
+     *
+     * The rules engine cannot rewrite prose, so this does the one thing it
+     * honestly can: a personality asking for brevity gets the first sentence,
+     * which is always the "here's what I did" line. Anything else is left alone
+     * rather than decorated with fake warmth.
+     */
+    private fun applyTone(reply: String, personaFragment: String?): String {
+        val persona = personaFragment?.lowercase() ?: return reply
+        if (!persona.contains("concise") && !persona.contains("terse")) return reply
+        return reply.substringBefore(". ").trimEnd('.').plus(".")
     }
 
     /**
@@ -68,7 +85,9 @@ class CloudAssistantEngine(
             (false to request.userMessage)
 
         val system = buildString {
-            append(AiProtocol.systemPrompt(request.stateSummary))
+            // A custom prompt replaces the shipped one; an empty override means
+            // "use the default", never "send no instructions".
+            append(AdvancedConfig.systemPrompt(request.customPrompt, request.stateSummary))
             request.personaFragment?.takeIf { it.isNotBlank() }?.let {
                 append("\n\nAdditional style guidance:\n")
                 append(it)

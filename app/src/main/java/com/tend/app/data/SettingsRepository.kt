@@ -12,6 +12,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tend.app.data.backup.BackupSettings
 import com.tend.app.domain.chat.ChatMode
+import com.tend.app.domain.chat.Personality
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,10 @@ class SettingsRepository(context: Context) {
     private val heatmapWeeksKey = intPreferencesKey("heatmap_weeks")
     private val showAiBarKey = booleanPreferencesKey("show_ai_bar")
     private val chatModeKey = stringPreferencesKey("chat_mode")
+    private val customPromptKey = stringPreferencesKey("custom_system_prompt")
+    private val advancedJsonKey = stringPreferencesKey("advanced_json")
+    private val personalitiesKey = stringPreferencesKey("personalities")
+    private val activePersonalityKey = longPreferencesKey("active_personality")
     private val providerKey = stringPreferencesKey("ai_provider")
     private val customCategoriesKey = stringSetPreferencesKey("custom_categories")
     private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
@@ -56,6 +61,27 @@ class SettingsRepository(context: Context) {
     val showAiBar: Flow<Boolean> = store.data.map { it[showAiBarKey] ?: true }
     /** The mode the user selected. What actually runs also depends on a key existing. */
     val chatMode: Flow<ChatMode> = store.data.map { ChatMode.from(it[chatModeKey]) }
+
+    /** Empty means "use the shipped prompt" — not "send no prompt". */
+    val customPrompt: Flow<String> = store.data.map { it[customPromptKey].orEmpty() }
+
+    val advancedJson: Flow<String> = store.data.map { it[advancedJsonKey].orEmpty() }
+
+    /**
+     * Presets plus anything the user made. Stored profiles that fail to parse
+     * are dropped rather than throwing, so a corrupt entry costs one profile
+     * instead of the whole screen.
+     */
+    val personalities: Flow<List<Personality>> = store.data.map { prefs ->
+        val stored = prefs[personalitiesKey]?.let(Personality::decodeList).orEmpty()
+        Personality.Presets + stored.filterNot { saved -> Personality.Presets.any { it.id == saved.id } }
+    }
+
+    val activePersonality: Flow<Personality> = store.data.map { prefs ->
+        val id = prefs[activePersonalityKey] ?: Personality.Default.id
+        val stored = prefs[personalitiesKey]?.let(Personality::decodeList).orEmpty()
+        (Personality.Presets + stored).firstOrNull { it.id == id } ?: Personality.Default
+    }
     val provider: Flow<String> = store.data.map { it[providerKey] ?: PROVIDER_GEMINI }
     val customCategories: Flow<List<String>> =
         store.data.map { (it[customCategoriesKey] ?: emptySet()).sorted() }
@@ -80,6 +106,23 @@ class SettingsRepository(context: Context) {
 
     suspend fun setChatMode(mode: ChatMode) {
         store.edit { it[chatModeKey] = mode.stored }
+    }
+
+    suspend fun setCustomPrompt(prompt: String) {
+        store.edit { it[customPromptKey] = prompt }
+    }
+
+    /** Callers validate first; this only stores. */
+    suspend fun setAdvancedJson(json: String) {
+        store.edit { it[advancedJsonKey] = json }
+    }
+
+    suspend fun saveUserPersonalities(list: List<Personality>) {
+        store.edit { it[personalitiesKey] = Personality.encodeList(list.filterNot(Personality::builtIn)) }
+    }
+
+    suspend fun setActivePersonality(id: Long) {
+        store.edit { it[activePersonalityKey] = id }
     }
 
     suspend fun setProvider(provider: String) {

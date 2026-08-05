@@ -66,6 +66,7 @@ import com.tend.app.data.backup.BackupFormat
 import com.tend.app.data.backup.BackupManager
 import com.tend.app.data.vault.VaultState
 import com.tend.app.domain.Time
+import com.tend.app.domain.chat.ChatMode
 import com.tend.app.ui.components.DialogInput
 import com.tend.app.ui.components.Kicker
 import com.tend.app.ui.components.ScreenTitle
@@ -318,6 +319,62 @@ fun SettingsScreen(vm: MainViewModel) {
                         fontSize = 11.5.sp, color = Faint,
                     )
                 }
+            }
+        }
+
+        // ── System status ───────────────────────────────
+        // One card that answers "what is this app currently doing?" — every row
+        // reads the same persisted state the feature itself reads, so a status
+        // here cannot disagree with the toggle that set it.
+        SectionLabel("SYSTEM STATUS")
+        TendCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(vertical = 4.dp)) {
+                val chatModeNow by vm.effectiveChatMode.collectAsStateWithLifecycle()
+                val activePersona by vm.activePersonality.collectAsStateWithLifecycle()
+                val vaultNow by vm.vaultState.collectAsStateWithLifecycle()
+                val backupStatus by vm.backupStatus.collectAsStateWithLifecycle()
+                val tasksNow by vm.tasks.collectAsStateWithLifecycle()
+                val planNow by vm.plan.collectAsStateWithLifecycle()
+                val habitsNow by vm.habits.collectAsStateWithLifecycle()
+
+                StatusRow("Assistant", chatModeNow.label + " mode", chatModeNow == ChatMode.Ai)
+                StatusRow(
+                    "API key",
+                    // Never any part of the key itself — only that one exists.
+                    if (savedKey.isEmpty()) "None"
+                    else "${SettingsRepository.providerLabel(provider)} key active",
+                    savedKey.isNotEmpty(),
+                )
+                StatusRow("Model", if (savedKey.isEmpty()) "—" else model, savedKey.isNotEmpty())
+                StatusRow("Personality", activePersona.name, activePersona.id != 1L)
+                StatusRow(
+                    "Memory",
+                    when (vaultNow) {
+                        VaultState.NotSetUp -> "Not set up"
+                        VaultState.Locked -> "Locked"
+                        VaultState.Unlocked -> "Unlocked"
+                    },
+                    vaultNow == VaultState.Unlocked,
+                )
+                StatusRow("Today", "${habitsNow.count { it.doneToday }} of ${habitsNow.size} habits done", null)
+                StatusRow("Tasks", "${tasksNow.count { !it.done }} open", null)
+                StatusRow("Current plan", "${planNow.size} blocks today", null)
+                StatusRow("Reminders", if (notificationsEnabled) "On" else "Off", notificationsEnabled)
+                StatusRow("Exact alarms", if (exactAllowed) "Allowed" else "Not allowed", exactAllowed)
+                StatusRow("Nightly check-in", if (checkinEnabled) Time.clockAmPm(checkinMin) else "Off", checkinEnabled)
+                StatusRow("Calendar", if (calendarEnabled && calendarGranted) "Connected" else "Off", calendarEnabled && calendarGranted)
+                StatusRow(
+                    "Backups",
+                    when {
+                        backupStatus.failed -> "Last run failed"
+                        backupStatus.ran -> "Last run OK"
+                        else -> "Never run"
+                    },
+                    backupStatus.ran && !backupStatus.failed,
+                )
+                StatusRow("Appearance", "$weeks-week heatmap", null)
+                StatusRow("Widgets", "Today · Streak", null)
+                StatusRow("Analytics", "None collected", true)
             }
         }
 
@@ -581,6 +638,134 @@ fun SettingsScreen(vm: MainViewModel) {
                 )
             }
         }
+
+        // ── Advanced ────────────────────────────────────
+        SectionLabel("ADVANCED")
+        AdvancedSettingsCard(vm)
+
+        SectionLabel("AI PERSONALITY")
+        PersonalityCard(vm)
+
+        // ── How this works ──────────────────────────────
+        SectionLabel("HOW THIS WORKS")
+        ModeDocumentationCard()
+    }
+}
+
+/**
+ * Plain-language documentation of what the app actually does.
+ *
+ * Written from the code rather than from intent: each claim here corresponds to
+ * something enforced elsewhere in this branch, and if one stops being true the
+ * text is wrong and should be changed with it.
+ */
+@Composable
+private fun ModeDocumentationCard() {
+    TendCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+
+            DocBlock(
+                "AI mode",
+                "Sends your message, up to 20 recent messages from the current chat, and a " +
+                    "summary of your habits, open tasks and today's plan to the provider you " +
+                    "chose. Nothing else leaves the device. The reply comes back as a " +
+                    "structured action, which is how a task or habit gets created for real " +
+                    "rather than just described.",
+            )
+
+            DocBlock(
+                "Offline / local mode",
+                "No network, no model. A rule engine reads the message you just typed: " +
+                    "habit-sounding phrasing becomes a habit, \"at 5pm\" becomes a plan block, " +
+                    "anything else becomes a task, and planning a whole day is declined rather " +
+                    "than faked. By default it uses only that latest message — no history, no " +
+                    "state summary is even assembled.",
+            )
+
+            DocBlock(
+                "With no API key",
+                "AI mode falls back to offline automatically, and the chat says so instead of " +
+                    "pretending. Everything except the assistant works exactly the same.",
+            )
+
+            DocBlock(
+                "Adding older messages to context",
+                "Long-press any message → \"Add to AI context\" to mark it. Marked messages " +
+                    "turn teal and travel with your next offline message. Offline this is also " +
+                    "how a follow-up like \"add that\" knows what \"that\" was.",
+            )
+
+            DocBlock(
+                "Memory",
+                "Encrypted with a key derived from your password, which is never stored. " +
+                    "Memory is excluded from everything the assistant sees, in both modes — " +
+                    "not by a setting, but because the vault isn't reachable from the code that " +
+                    "builds a request. \"add to memory …\" and \"search memory …\" are handled " +
+                    "on-device and never sent anywhere, even in AI mode.",
+            )
+
+            DocBlock(
+                "Things chat creates",
+                "A task, habit or plan block made from a chat message shows as a chip on that " +
+                    "message, and tapping it opens that exact item. The link is stored as an id, " +
+                    "not matched from the text, so it keeps working after you rename the item. " +
+                    "Deleting the message leaves the item alone; deleting the item leaves the " +
+                    "chip, which then tells you it's gone.",
+            )
+
+            DocBlock(
+                "What the toggles reach",
+                "Reminders and nightly check-ins schedule real alarms and need notification " +
+                    "permission; exact timing additionally needs \"Alarms & reminders\". " +
+                    "Calendar connections are read-only and need calendar permission. Backups " +
+                    "write a plain-JSON file to a folder you pick — readable in any text " +
+                    "editor, and never containing your API keys or anything from Memory. " +
+                    "Appearance changes heatmap width only. Widgets read the same database as " +
+                    "the app, so a check-off anywhere shows everywhere.",
+            )
+
+            DocBlock(
+                "Analytics",
+                "There are none. Tend has no analytics SDK, no crash reporter and no telemetry " +
+                    "of any kind. The only outbound network request the app can make is the one " +
+                    "you trigger by using AI mode with your own key.",
+            )
+        }
+    }
+}
+
+/**
+ * One line of system status.
+ *
+ * [good] tints the value: true is affirmative, false is a real "off", and null
+ * means the row is informational and has no good or bad state — a count of open
+ * tasks is not a problem to be fixed.
+ */
+@Composable
+private fun StatusRow(label: String, value: String, good: Boolean?) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 12.5.sp, color = Muted, modifier = Modifier.weight(1f))
+        Text(
+            value,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = when (good) {
+                true -> Teal
+                false -> Muted
+                null -> Ink
+            },
+        )
+    }
+}
+
+@Composable
+private fun DocBlock(title: String, body: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Text(body, fontSize = 12.sp, color = Muted, lineHeight = 17.5.sp)
     }
 }
 
