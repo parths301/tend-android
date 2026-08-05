@@ -9,24 +9,21 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -50,6 +47,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -61,10 +59,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tend.app.MainViewModel
 import com.tend.app.PendingRestore
 import com.tend.app.Tab
+import com.tend.app.ai.ModelOption
+import com.tend.app.ai.OpenRouterCatalog
 import com.tend.app.data.SettingsRepository
 import com.tend.app.data.backup.BackupFormat
 import com.tend.app.data.backup.BackupManager
 import com.tend.app.domain.Time
+import com.tend.app.ui.components.DialogInput
 import com.tend.app.ui.components.Kicker
 import com.tend.app.ui.components.ScreenTitle
 import com.tend.app.ui.components.Stepper
@@ -73,6 +74,7 @@ import com.tend.app.ui.components.TimeStepperRow
 import com.tend.app.ui.components.tapNoRipple
 import com.tend.app.ui.motion.LocalTendHaptics
 import com.tend.app.ui.motion.TendHaptic
+import com.tend.app.ui.motion.TendMotion
 import com.tend.app.ui.motion.bouncyTap
 import com.tend.app.ui.motion.shakeOnError
 import com.tend.app.ui.theme.Border
@@ -102,12 +104,10 @@ fun SettingsScreen(vm: MainViewModel) {
 
     val context = LocalContext.current
 
-    // Load the model list as soon as a key is available.
-    LaunchedEffect(provider, savedKey) {
-        if (savedKey.isNotEmpty() && modelsUi.models.isEmpty() && !modelsUi.loading && modelsUi.error == null) {
-            vm.refreshModels()
-        }
-    }
+    // Serve the cached list, then quietly bring it up to date. The ViewModel
+    // decides whether that needs the network; this only says "we're looking at
+    // it now".
+    LaunchedEffect(provider, savedKey) { vm.refreshModelsIfStale() }
 
     // Re-check OS permission grants every time the screen resumes — e.g. after the
     // user returns from the system "Alarms & reminders" or app-settings pages.
@@ -178,14 +178,13 @@ fun SettingsScreen(vm: MainViewModel) {
 
                 FieldLabel("Provider")
                 Row(Modifier.background(SegBg, RoundedCornerShape(12.dp)).padding(3.dp)) {
-                    ProviderButton(
-                        Modifier.weight(1f), "Gemini",
-                        provider == SettingsRepository.PROVIDER_GEMINI,
-                    ) { vm.setProvider(SettingsRepository.PROVIDER_GEMINI) }
-                    ProviderButton(
-                        Modifier.weight(1f), "Claude",
-                        provider == SettingsRepository.PROVIDER_ANTHROPIC,
-                    ) { vm.setProvider(SettingsRepository.PROVIDER_ANTHROPIC) }
+                    SettingsRepository.PROVIDERS.forEach { option ->
+                        ProviderButton(
+                            Modifier.weight(1f),
+                            SettingsRepository.providerLabel(option),
+                            provider == option,
+                        ) { vm.setProvider(option) }
+                    }
                 }
 
                 var keyInput by rememberSaveable(provider, savedKey) { mutableStateOf(savedKey) }
@@ -219,81 +218,98 @@ fun SettingsScreen(vm: MainViewModel) {
                     }
                 }
 
-                // ── model dropdown — appears once a key is saved ──
-                if (savedKey.isNotEmpty()) {
+                // ── model picker ──
+                // OpenRouter's catalogue is public, so its models can be browsed
+                // before a key exists; the other two need one first.
+                val canBrowseModels = savedKey.isNotEmpty() ||
+                    provider == SettingsRepository.PROVIDER_OPENROUTER
+                if (canBrowseModels) {
                     HorizontalDivider(color = RowDivider, thickness = 1.dp)
-                    FieldLabel("Model")
-                    when {
-                        modelsUi.loading -> Text("Fetching models…", fontSize = 12.5.sp, color = Faint)
-                        modelsUi.error != null -> {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    "Couldn't load models: ${modelsUi.error}",
-                                    fontSize = 12.sp, color = Terracotta, lineHeight = 17.sp,
-                                )
-                                Box(
-                                    Modifier
-                                        .border(1.dp, Border, RoundedCornerShape(99.dp))
-                                        .tapNoRipple { vm.refreshModels() }
-                                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                                ) {
-                                    Text("Retry", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Ink)
-                                }
-                            }
-                        }
-                        modelsUi.models.isEmpty() ->
-                            Text("No text models available for this key.", fontSize = 12.5.sp, color = Faint)
-                        else -> {
-                            var menuOpen by remember { mutableStateOf(false) }
-                            Box {
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .background(Card, RoundedCornerShape(12.dp))
-                                        .border(1.dp, Border, RoundedCornerShape(12.dp))
-                                        .tapNoRipple { menuOpen = true }
-                                        .padding(horizontal = 12.dp, vertical = 11.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(model, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                                    Text("▾", fontSize = 13.sp, color = Muted)
-                                }
-                                DropdownMenu(
-                                    expanded = menuOpen,
-                                    onDismissRequest = { menuOpen = false },
-                                    modifier = Modifier.heightIn(max = 300.dp).width(260.dp),
-                                    shape = RoundedCornerShape(14.dp),
-                                    containerColor = Cream,
-                                    tonalElevation = 0.dp,
-                                    shadowElevation = 8.dp,
-                                    border = BorderStroke(1.dp, Border),
-                                ) {
-                                    modelsUi.models.forEach { m ->
-                                        DropdownMenuItem(
-                                            modifier = Modifier.height(42.dp),
-                                            contentPadding = PaddingValues(horizontal = 14.dp),
-                                            text = {
-                                                Text(
-                                                    if (m == model) "$m  ✓" else m,
-                                                    fontSize = 12.5.sp,
-                                                    color = if (m == model) Teal else Ink,
-                                                    fontWeight = if (m == model) FontWeight.Bold else FontWeight.Medium,
-                                                )
-                                            },
-                                            onClick = {
-                                                vm.setModel(m)
-                                                menuOpen = false
-                                            },
-                                        )
-                                    }
-                                }
-                            }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        FieldLabel("Model")
+                        // A refresh in flight is a footnote, not a state — the
+                        // list stays usable while it happens.
+                        if (modelsUi.refreshing) {
+                            Text("refreshing…", fontSize = 11.sp, color = Faint)
+                        } else {
+                            Text(
+                                "Refresh",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Muted,
+                                modifier = Modifier.tapNoRipple(TendHaptic.Select) { vm.refreshModels() },
+                            )
                         }
                     }
+
+                    var pickerOpen by remember { mutableStateOf(false) }
+                    when {
+                        modelsUi.loading ->
+                            Text("Fetching models…", fontSize = 12.5.sp, color = Faint)
+
+                        modelsUi.models.isEmpty() && modelsUi.error != null ->
+                            Text(
+                                "Couldn't load models: ${modelsUi.error}",
+                                fontSize = 12.sp, color = Terracotta, lineHeight = 17.sp,
+                            )
+
+                        modelsUi.models.isEmpty() ->
+                            Text("No text models available for this key.", fontSize = 12.5.sp, color = Faint)
+
+                        else -> Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(Card, RoundedCornerShape(12.dp))
+                                .border(1.dp, Border, RoundedCornerShape(12.dp))
+                                .bouncyTap(pressedScale = TendMotion.PressScaleLarge) { pickerOpen = true }
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                model,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                            )
+                            Text("▾", fontSize = 13.sp, color = Muted)
+                        }
+                    }
+
+                    // A stale list that still works is worth keeping on screen;
+                    // the failure is reported under it rather than instead of it.
+                    if (modelsUi.error != null && modelsUi.models.isNotEmpty()) {
+                        Text(
+                            "Showing the last known list — refresh failed: ${modelsUi.error}",
+                            fontSize = 11.sp, color = Terracotta, lineHeight = 15.sp,
+                        )
+                    }
+
+                    if (pickerOpen) {
+                        ModelPickerDialog(
+                            models = modelsUi.models,
+                            selected = model,
+                            onPick = {
+                                vm.setModel(it)
+                                pickerOpen = false
+                            },
+                            onDismiss = { pickerOpen = false },
+                        )
+                    }
+
                     Text(
-                        "✓ Using ${SettingsRepository.providerLabel(provider)} ($model)",
-                        fontSize = 11.5.sp, color = Teal,
+                        if (savedKey.isEmpty())
+                            "Add a key to use ${SettingsRepository.providerLabel(provider)}"
+                        else "✓ Using ${SettingsRepository.providerLabel(provider)} ($model)",
+                        fontSize = 11.5.sp,
+                        color = if (savedKey.isEmpty()) Faint else Teal,
                     )
                 } else {
                     Text(
@@ -508,6 +524,117 @@ fun SettingsScreen(vm: MainViewModel) {
                     fontSize = 12.sp, color = Muted, lineHeight = 17.sp,
                 )
             }
+        }
+    }
+}
+
+/**
+ * Model picker.
+ *
+ * A dialog rather than a dropdown because OpenRouter returns ~270 usable
+ * models: that needs a search field, and a text field inside a `DropdownMenu`
+ * fights the menu for focus. Providers with a short catalogue (Gemini,
+ * Anthropic) skip the shortlist entirely and just list everything.
+ */
+@Composable
+private fun ModelPickerDialog(
+    models: List<ModelOption>,
+    selected: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    var showAll by remember { mutableStateOf(false) }
+
+    val recommended = remember(models) { models.filter { it.recommended } }
+    val hasShortlist = recommended.isNotEmpty() && models.size > OpenRouterCatalog.SHORTLIST_SIZE
+    val shortlist = remember(recommended) { recommended.take(OpenRouterCatalog.SHORTLIST_SIZE) }
+
+    // Search always looks at everything — being in "recommended" mode shouldn't
+    // hide a model the user explicitly typed the name of.
+    val searching = query.isNotBlank()
+    val shown = remember(models, query, showAll, hasShortlist) {
+        when {
+            searching -> models.filter {
+                it.id.contains(query, true) || it.label.contains(query, true)
+            }
+            hasShortlist && !showAll -> shortlist
+            else -> models
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        TendCard(Modifier.fillMaxWidth()) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("Model", fontFamily = SpaceGrotesk, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+
+                DialogInput(query, { query = it }, "Search ${models.size} models…")
+
+                if (!searching && hasShortlist && !showAll) {
+                    Text(
+                        "Recommended — cheapest reliable picks, free first",
+                        fontSize = 11.sp, color = Faint,
+                    )
+                }
+
+                if (shown.isEmpty()) {
+                    Text("Nothing matches \"$query\".", fontSize = 12.5.sp, color = Muted)
+                }
+
+                LazyColumn(
+                    Modifier.heightIn(max = 340.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    items(shown, key = { it.id }) { option ->
+                        ModelRow(option, option.id == selected) { onPick(option.id) }
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!searching && hasShortlist) {
+                        OutlinePill(if (showAll) "Show recommended" else "Show all ${models.size}") {
+                            showAll = !showAll
+                        }
+                    }
+                    OutlinePill("Close", onDismiss)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelRow(option: ModelOption, isSelected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                if (isSelected) Teal.copy(alpha = 0.10f) else Color.Transparent,
+                RoundedCornerShape(10.dp),
+            )
+            .bouncyTap(haptic = TendHaptic.Select, pressedScale = TendMotion.PressScaleLarge, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(
+                option.id,
+                fontSize = 12.5.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) Teal else Ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            option.detail?.let {
+                Text(it, fontSize = 10.5.sp, color = Faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (isSelected) {
+            Text("✓", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Teal)
         }
     }
 }

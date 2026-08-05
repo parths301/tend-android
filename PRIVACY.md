@@ -43,13 +43,27 @@ the provider you selected:
 
 That request goes directly from your device to:
 
-- **Google** (Gemini API), or
-- **Anthropic** (Claude API),
+- **Google** (Gemini API),
+- **Anthropic** (Claude API), or
+- **OpenRouter** (openrouter.ai).
 
 depending on which provider you chose. It does not pass through any server
 operated by the developer. Your data is then handled under that provider's own
 privacy policy and the terms of your account with them. Remove the key in
 Settings to stop all outbound requests.
+
+**OpenRouter is different in one important way.** It is a *router*, not a model
+provider: it forwards your request on to whichever company actually operates the
+model you picked (OpenAI, Google, Anthropic, Mistral, Meta, DeepSeek and others).
+So with OpenRouter selected, your message is seen by OpenRouter **and** by that
+upstream provider, and is covered by both of their policies. The model you choose
+in Settings determines which company that is — the vendor is the first part of
+the model id, for example `openai/…` or `mistralai/…`.
+
+Tend sends two non-identifying headers with OpenRouter requests (`HTTP-Referer`
+and `X-OpenRouter-Title`) that identify the *app*, not you. Tend does not send
+your name, email, device id, or any of your habits, tasks or notes beyond the
+summary described above.
 
 ## Your API key
 

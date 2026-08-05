@@ -86,7 +86,12 @@ from the repo.
      analytics.
    - Shared with third parties: **only if the user adds their own API key** —
      then their typed messages and a summary of their habits/tasks go to Google
-     (Gemini) or Anthropic (Claude). Not shared when no key is set.
+     (Gemini), Anthropic (Claude), or OpenRouter. Not shared when no key is set.
+   - **OpenRouter needs care on this form.** It is a router: a request goes to
+     OpenRouter *and then on* to the company operating the chosen model
+     (OpenAI, Google, Mistral, DeepSeek, …). The recipient therefore depends on
+     the user's model choice, which is worth saying plainly in the listing
+     rather than naming a single vendor.
    - Calendar: read on-device only, never leaves the device.
    - Backups: written to storage the user chooses, never uploaded by Tend.
 7. **Content rating questionnaire**, target audience, and ads declaration (no

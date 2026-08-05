@@ -216,7 +216,7 @@ object AiProtocol {
         // Day planning needs a real model
         if (Regex("(?i)\\bplan\\s+(my|the|out)\\b").containsMatchIn(input)) {
             return AiResult(
-                reply = "Planning a whole day needs the full assistant — add your Gemini or Claude API key in Settings and I'll lay out your day. Offline I can still do quick adds like \"gym at 6pm\".",
+                reply = "Planning a whole day needs the full assistant — add a Gemini, Claude or OpenRouter API key in Settings and I'll lay out your day. Offline I can still do quick adds like \"gym at 6pm\".",
                 actions = emptyList(),
             )
         }

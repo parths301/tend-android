@@ -1,0 +1,348 @@
+{
+ "data": [
+  {
+   "id": "google/lyria-3-pro-preview",
+   "name": "Google: Lyria 3 Pro Preview",
+   "architecture": {
+    "modality": "text+image->text+audio",
+    "input_modalities": [
+     "text",
+     "image"
+    ],
+    "output_modalities": [
+     "text",
+     "audio"
+    ]
+   },
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "response_format",
+    "seed",
+    "temperature",
+    "top_p"
+   ]
+  },
+  {
+   "id": "openrouter/auto",
+   "name": "Auto Router",
+   "architecture": {
+    "modality": "text+image+file+audio+video->text+image",
+    "input_modalities": [
+     "text",
+     "image",
+     "audio",
+     "file",
+     "video"
+    ],
+    "output_modalities": [
+     "text",
+     "image"
+    ]
+   },
+   "pricing": {
+    "prompt": "-1",
+    "completion": "-1"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "include_reasoning",
+    "logit_bias",
+    "logprobs",
+    "max_tokens",
+    "min_p",
+    "prediction",
+    "presence_penalty",
+    "reasoning",
+    "reasoning_effort",
+    "repetition_penalty",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_a",
+    "top_k",
+    "top_logprobs",
+    "top_p",
+    "web_search_options"
+   ]
+  },
+  {
+   "id": "openai/gpt-oss-20b:free",
+   "name": "OpenAI: gpt-oss-20b (free)",
+   "architecture": {
+    "modality": "text->text",
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "include_reasoning",
+    "logprobs",
+    "max_tokens",
+    "presence_penalty",
+    "reasoning",
+    "reasoning_effort",
+    "repetition_penalty",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_k",
+    "top_logprobs",
+    "top_p"
+   ]
+  },
+  {
+   "id": "openai/gpt-oss-20b",
+   "name": "OpenAI: gpt-oss-20b",
+   "architecture": {
+    "modality": "text->text",
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.00000003",
+    "completion": "0.00000013"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "include_reasoning",
+    "logit_bias",
+    "logprobs",
+    "max_tokens",
+    "min_p",
+    "presence_penalty",
+    "reasoning",
+    "reasoning_effort",
+    "repetition_penalty",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_k",
+    "top_logprobs",
+    "top_p"
+   ]
+  },
+  {
+   "id": "mistralai/mistral-small-24b-instruct-2501",
+   "name": "Mistral: Mistral Small 3",
+   "architecture": {
+    "modality": "text->text",
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.00000005",
+    "completion": "0.00000008"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "logit_bias",
+    "max_tokens",
+    "min_p",
+    "presence_penalty",
+    "repetition_penalty",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "top_k",
+    "top_p"
+   ]
+  },
+  {
+   "id": "openai/gpt-4o-mini",
+   "name": "OpenAI: GPT-4o-mini",
+   "architecture": {
+    "modality": "text+image+file->text",
+    "input_modalities": [
+     "text",
+     "image",
+     "file"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.00000015",
+    "completion": "0.0000006"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "logit_bias",
+    "logprobs",
+    "max_completion_tokens",
+    "max_tokens",
+    "prediction",
+    "presence_penalty",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_logprobs",
+    "top_p",
+    "web_search_options"
+   ]
+  },
+  {
+   "id": "sao10k/l3-lunaris-8b",
+   "name": "Sao10K: Llama 3 8B Lunaris",
+   "architecture": {
+    "modality": "text->text",
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.00000004",
+    "completion": "0.00000005"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "logit_bias",
+    "logprobs",
+    "max_tokens",
+    "min_p",
+    "presence_penalty",
+    "repetition_penalty",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "top_k",
+    "top_logprobs",
+    "top_p"
+   ]
+  },
+  {
+   "id": "nex-agi/nex-n2-mini",
+   "name": "Nex AGI: Nex-N2-Mini",
+   "architecture": {
+    "modality": "text+image->text",
+    "input_modalities": [
+     "text",
+     "image"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000000025",
+    "completion": "0.0000001"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "logprobs",
+    "max_tokens",
+    "reasoning",
+    "response_format",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_k",
+    "top_logprobs",
+    "top_p"
+   ]
+  },
+  {
+   "id": "thinkingmachines/inkling-small",
+   "name": "Thinking Machines: Inkling Small",
+   "architecture": {
+    "modality": "text+image+audio->text",
+    "input_modalities": [
+     "text",
+     "image",
+     "audio"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.0000005",
+    "completion": "0.0000012"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "include_reasoning",
+    "logit_bias",
+    "logprobs",
+    "max_tokens",
+    "min_p",
+    "presence_penalty",
+    "reasoning",
+    "reasoning_effort",
+    "repetition_penalty",
+    "seed",
+    "stop",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_k",
+    "top_logprobs",
+    "top_p"
+   ]
+  },
+  {
+   "id": "synthetic/variable-router",
+   "name": "Synthetic: Variable-priced router (test fixture only)",
+   "architecture": {
+    "modality": "text->text",
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "-1",
+    "completion": "-1"
+   },
+   "supported_parameters": [
+    "response_format"
+   ]
+  }
+ ]
+}

@@ -16,7 +16,7 @@ and [`chats/chat1.md`](chats/chat1.md)).
 | **Widgets** | Dark home-screen widget mockups: streak, quick-check, heatmap, Deep Work bars |
 | **Habit detail** | Month calendar (with month paging), streak/best/rate tiles, notes with add-note input |
 | **Ask Tend** | Bottom-sheet AI chat on every main tab — type "add buy groceries at 5pm" and it lands in your plan; suggestion chips for planning and weekly summary |
-| **Settings** | BYOK Anthropic API key (encrypted on-device), model picker, heatmap width, AI bar toggle, backup & restore — reachable via the ⚙ in the Ask Tend sheet |
+| **Settings** | BYOK API keys for Gemini / Claude / OpenRouter (encrypted on-device), searchable model picker, heatmap width, AI bar toggle, backup & restore — reachable via the ⚙ in the Ask Tend sheet |
 
 **Swipe left/right** anywhere on the four main tabs to switch between them.
 
@@ -27,12 +27,34 @@ and [`chats/chat1.md`](chats/chat1.md)).
 - **State**: one `MainViewModel` exposing `StateFlow`s; screens are pure functions of state
 - **Persistence**: Room (`habits`, `habit_logs`, `tasks`, `plan_blocks`, `notes`), seeded on first
   launch with the prototype's demo data (deterministic LCG history so heatmaps look right)
-- **Settings**: Jetpack DataStore; the Anthropic API key is stored in `EncryptedSharedPreferences`
-- **AI**: "Ask Tend" works offline out of the box with a built-in parser (mirrors the prototype's
-  scripted assistant). Add your Anthropic API key in Settings to route it through the official
-  [Anthropic Java SDK](https://github.com/anthropics/anthropic-sdk-java) — Claude then returns a
-  structured JSON action (`add_task` / `add_plan` / `add_habit`) that the app applies. Default
-  model: `claude-opus-4-8`. Network failures fall back to the offline parser.
+- **Settings**: Jetpack DataStore; API keys are stored in `EncryptedSharedPreferences`, one per
+  provider, so switching providers doesn't lose the other key
+- **AI**: "Ask Tend" works offline out of the box. Offline is **not** a local model — it's a
+  regex rule engine in `AiProtocol.simulate()`: habit-sounding phrasing becomes a habit, "at 5pm"
+  becomes a plan block, anything else becomes a task, and whole-day planning is declined rather
+  than faked. Add a key for the real thing.
+
+### Providers (BYOK)
+
+| Provider | Transport | Models |
+|---|---|---|
+| **Gemini** | REST, `responseMimeType: application/json` | live from `/v1beta/models` |
+| **Claude** | official [Anthropic Java SDK](https://github.com/anthropics/anthropic-sdk-java) | live from `/v1/models` |
+| **OpenRouter** | OpenAI-shaped REST, `response_format: json_object` | live from `/api/v1/models` |
+
+Whichever provider is selected returns a structured JSON action
+(`add_task` / `add_plan` / `add_habit`) that the app applies.
+
+OpenRouter gives one key access to ~340 models from ~58 vendors, including free
+ones. Its catalogue is filtered to models that can be pinned to JSON **and**
+emit text only (`OpenRouterCatalog`) — the second condition matters, because
+Google's Lyria *music* models are free and advertise `response_format`. The
+picker shows a shortlist of cheap, well-known models before the full list, and
+has a search field.
+
+Model lists are fetched live and cached to DataStore, so the picker opens
+instantly on a cold start and refreshes in the background (5-minute TTL). A
+failed refresh keeps the last known list rather than emptying the picker.
 
 ## Motion & haptics
 

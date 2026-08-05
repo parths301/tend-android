@@ -11,9 +11,25 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * BYOK client for "Ask Tend". Supports two providers:
+ * One entry in the model picker, uniform across providers.
+ *
+ * [detail] and [recommended] only carry information for OpenRouter, where the
+ * catalogue is large enough to need ranking; for Gemini and Anthropic the list
+ * is short and the id says everything. Keeping one shape means the picker has
+ * one code path.
+ */
+data class ModelOption(
+    val id: String,
+    val label: String = id,
+    val detail: String? = null,
+    val recommended: Boolean = false,
+)
+
+/**
+ * BYOK client for "Ask Tend". Supports three providers:
  *  - Gemini (Google AI, REST API)
  *  - Claude (Anthropic, official Java SDK)
+ *  - OpenRouter (one key, ~340 models from 58 vendors, OpenAI-shaped REST)
  *
  * Also lists the models available to a key so Settings can offer a picker
  * instead of asking the user to type a model name.
@@ -35,16 +51,23 @@ class AiClient {
         // assistant messages before sending.
         val turns = history.dropWhile { it.first }
         require(turns.isNotEmpty()) { "no user message to send" }
+        // Named branches rather than a trailing `else`: with three providers an
+        // else-falls-through-to-Claude would silently send an OpenRouter key to
+        // Anthropic if a constant were ever mistyped.
         return when (provider) {
             SettingsRepository.PROVIDER_GEMINI -> geminiComplete(apiKey, model, system, turns)
-            else -> claudeComplete(apiKey, model, system, turns)
+            SettingsRepository.PROVIDER_OPENROUTER -> openRouterComplete(apiKey, model, system, turns)
+            SettingsRepository.PROVIDER_ANTHROPIC -> claudeComplete(apiKey, model, system, turns)
+            else -> throw IllegalArgumentException("Unknown AI provider: $provider")
         }
     }
 
     /** Models the key can use, best default first. */
-    fun listModels(provider: String, apiKey: String): List<String> = when (provider) {
-        SettingsRepository.PROVIDER_GEMINI -> geminiModels(apiKey)
-        else -> anthropicModels(apiKey)
+    fun listModels(provider: String, apiKey: String): List<ModelOption> = when (provider) {
+        SettingsRepository.PROVIDER_GEMINI -> geminiModels(apiKey).map { ModelOption(it) }
+        SettingsRepository.PROVIDER_OPENROUTER -> openRouterModels(apiKey)
+        SettingsRepository.PROVIDER_ANTHROPIC -> anthropicModels(apiKey).map { ModelOption(it) }
+        else -> throw IllegalArgumentException("Unknown AI provider: $provider")
     }
 
     // ── Gemini ──────────────────────────────────────────────────
@@ -114,6 +137,69 @@ class AiClient {
         val match = Regex("gemini-(\\d+)\\.(\\d+)").find(model) ?: return 0
         return match.groupValues[1].toInt() * 10 + match.groupValues[2].toInt()
     }
+
+    // ── OpenRouter ──────────────────────────────────────────────
+
+    private fun openRouterComplete(
+        apiKey: String,
+        model: String,
+        system: String,
+        history: List<Pair<Boolean, String>>,
+    ): String {
+        val messages = JSONArray()
+        messages.put(JSONObject().put("role", "system").put("content", system))
+        for ((isAssistant, text) in history) {
+            messages.put(
+                JSONObject()
+                    .put("role", if (isAssistant) "assistant" else "user")
+                    .put("content", text)
+            )
+        }
+        val body = JSONObject()
+            .put("model", model)
+            .put("messages", messages)
+            // The picker only offers models advertising response_format, so this
+            // is always honoured — the app's protocol is JSON-only.
+            .put("response_format", JSONObject().put("type", "json_object"))
+
+        val raw = http("POST", "$OPENROUTER_BASE/chat/completions", authHeaders(apiKey), body.toString())
+        val choices = JSONObject(raw).optJSONArray("choices")
+            ?: throw RuntimeException("OpenRouter returned no choices")
+        if (choices.length() == 0) throw RuntimeException("OpenRouter returned no choices")
+        return choices.getJSONObject(0).optJSONObject("message")?.optString("content").orEmpty()
+    }
+
+    private fun openRouterModels(apiKey: String): List<ModelOption> {
+        // With a key, /models/user respects the provider preferences set on the
+        // user's OpenRouter account; the public catalogue ignores them. Fall
+        // back to the public list, which needs no auth, so the picker still
+        // populates before a key is saved.
+        val raw = if (apiKey.isBlank()) {
+            http("GET", "$OPENROUTER_BASE/models", emptyMap())
+        } else {
+            try {
+                http("GET", "$OPENROUTER_BASE/models/user", authHeaders(apiKey))
+            } catch (e: Exception) {
+                http("GET", "$OPENROUTER_BASE/models", emptyMap())
+            }
+        }
+        return OpenRouterCatalog.parse(raw).map {
+            ModelOption(
+                id = it.id,
+                label = it.label,
+                detail = it.priceLabel,
+                recommended = it.recommended,
+            )
+        }
+    }
+
+    private fun authHeaders(apiKey: String) = mapOf(
+        "Authorization" to "Bearer $apiKey",
+        // Attribution for openrouter.ai's app rankings. Neither is required and
+        // neither identifies the user.
+        "HTTP-Referer" to APP_URL,
+        "X-OpenRouter-Title" to APP_NAME,
+    )
 
     // ── Anthropic ───────────────────────────────────────────────
 
@@ -216,6 +302,9 @@ class AiClient {
 
     private companion object {
         const val GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
+        const val OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+        const val APP_URL = "https://github.com/parths301/tend-android"
+        const val APP_NAME = "Tend"
 
         /** Non-text model ids to hide from the picker (chat protocol is text-only). */
         val NON_TEXT = Regex("embed|image|imagen|audio|tts|live|veo|aqa|vision|robotics|computer-use")

@@ -44,6 +44,12 @@ class SettingsRepository(context: Context) {
 
     private fun modelKey(provider: String) = stringPreferencesKey("model_$provider")
 
+    // Last successfully fetched model list per provider. Persisting it means a
+    // cold start can show the picker immediately instead of an empty list while
+    // the network answers.
+    private fun modelCacheKey(provider: String) = stringPreferencesKey("model_cache_$provider")
+    private fun modelCacheAtKey(provider: String) = longPreferencesKey("model_cache_at_$provider")
+
     val heatmapWeeks: Flow<Int> = store.data.map { it[heatmapWeeksKey] ?: 17 }
     val showAiBar: Flow<Boolean> = store.data.map { it[showAiBarKey] ?: true }
     val provider: Flow<String> = store.data.map { it[providerKey] ?: PROVIDER_GEMINI }
@@ -76,6 +82,25 @@ class SettingsRepository(context: Context) {
         store.edit { prefs ->
             val p = prefs[providerKey] ?: PROVIDER_GEMINI
             prefs[modelKey(p)] = model.trim().ifEmpty { defaultModel(p) }
+        }
+    }
+
+    /** Cached model ids for [provider], newest-known order, or empty. */
+    suspend fun cachedModels(provider: String): List<String> {
+        val raw = store.data.first()[modelCacheKey(provider)].orEmpty()
+        return raw.split('\n').filter { it.isNotBlank() }
+    }
+
+    /** Epoch millis of the last successful fetch for [provider]; 0 if never. */
+    suspend fun modelsFetchedAt(provider: String): Long =
+        store.data.first()[modelCacheAtKey(provider)] ?: 0L
+
+    suspend fun cacheModels(provider: String, ids: List<String>, atMillis: Long) {
+        // A newline-joined string rather than a preference Set: DataStore's Set
+        // has no defined order, and the ranking is the whole point here.
+        store.edit {
+            it[modelCacheKey(provider)] = ids.joinToString("\n")
+            it[modelCacheAtKey(provider)] = atMillis
         }
     }
 
@@ -178,10 +203,9 @@ class SettingsRepository(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
     )
 
-    private fun loadKeys(): Map<String, String> = mapOf(
-        PROVIDER_ANTHROPIC to (securePrefs.getString("anthropic_api_key", "") ?: ""),
-        PROVIDER_GEMINI to (securePrefs.getString("gemini_api_key", "") ?: ""),
-    )
+    private fun loadKeys(): Map<String, String> = PROVIDERS.associateWith {
+        securePrefs.getString("${it}_api_key", "") ?: ""
+    }
 
     private val keysState = MutableStateFlow(loadKeys())
     val apiKeys: StateFlow<Map<String, String>> = keysState.asStateFlow()
@@ -194,6 +218,10 @@ class SettingsRepository(context: Context) {
     companion object {
         const val PROVIDER_ANTHROPIC = "anthropic"
         const val PROVIDER_GEMINI = "gemini"
+        const val PROVIDER_OPENROUTER = "openrouter"
+
+        /** Every provider, in the order the segmented control shows them. */
+        val PROVIDERS = listOf(PROVIDER_GEMINI, PROVIDER_ANTHROPIC, PROVIDER_OPENROUTER)
         const val DEFAULT_CHECKIN_MIN = 21 * 60 + 30 // 9:30 PM nightly check-in
         val PRESET_CATEGORIES = listOf("Fitness", "Mind", "Work", "Health")
 
@@ -211,16 +239,19 @@ class SettingsRepository(context: Context) {
 
         fun defaultModel(provider: String): String = when (provider) {
             PROVIDER_GEMINI -> "gemini-2.5-flash"
+            PROVIDER_OPENROUTER -> "openai/gpt-oss-20b"
             else -> "claude-opus-4-8"
         }
 
         fun providerLabel(provider: String): String = when (provider) {
             PROVIDER_GEMINI -> "Gemini"
+            PROVIDER_OPENROUTER -> "OpenRouter"
             else -> "Claude"
         }
 
         fun keyPlaceholder(provider: String): String = when (provider) {
             PROVIDER_GEMINI -> "AIza…"
+            PROVIDER_OPENROUTER -> "sk-or-v1-…"
             else -> "sk-ant-…"
         }
     }

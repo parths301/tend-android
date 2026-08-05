@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import com.tend.app.ai.AiAction
 import com.tend.app.ai.AiClient
 import com.tend.app.ai.AiProtocol
+import com.tend.app.ai.ModelOption
+import com.tend.app.ai.OpenRouterCatalog
 import com.tend.app.data.CalEvent
 import com.tend.app.data.CalendarRepository
 import com.tend.app.data.SettingsRepository
@@ -68,11 +70,21 @@ data class HabitUi(
 data class ChatMsg(val fromAi: Boolean, val text: String)
 
 /** Models available to the saved key, fetched from the provider. */
+/**
+ * The model picker's state.
+ *
+ * [loading] is only for a genuinely empty picker; a refresh that has something
+ * to show sets [refreshing] instead and leaves [models] in place, so reopening
+ * Settings never blanks the list you were looking at.
+ */
 data class ModelsUi(
     val loading: Boolean = false,
-    val models: List<String> = emptyList(),
+    val refreshing: Boolean = false,
+    val models: List<ModelOption> = emptyList(),
     val error: String? = null,
-)
+) {
+    val ids: List<String> get() = models.map { it.id }
+}
 
 /**
  * Auto-plan's reply to the user. Carries whether it worked, so the banner can
@@ -676,29 +688,77 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refreshModelsFor(p)
     }
 
-    /** Fetch the model list for the current provider's saved key. */
-    fun refreshModels() = refreshModelsFor(provider.value)
+    /** User-initiated refresh — always hits the network. */
+    fun refreshModels() = refreshModelsFor(provider.value, force = true)
 
-    private fun refreshModelsFor(p: String) {
+    /**
+     * Called when Settings comes into view. Cheap: it serves the cache and only
+     * goes to the network if the list is older than [MODELS_TTL_MS].
+     */
+    fun refreshModelsIfStale() = refreshModelsFor(provider.value, force = false)
+
+    /**
+     * Loads the model list for [p], showing whatever is already known first.
+     *
+     * OpenRouter's catalogue is public, so its picker populates before a key is
+     * saved — the other two need one.
+     */
+    private fun refreshModelsFor(p: String, force: Boolean = true) {
         val key = settings.apiKeys.value[p].orEmpty()
-        if (key.isBlank()) {
+        val needsKey = p != SettingsRepository.PROVIDER_OPENROUTER
+        if (key.isBlank() && needsKey) {
             modelsState.value = ModelsUi()
             return
         }
-        modelsState.value = ModelsUi(loading = true)
         viewModelScope.launch {
+            // Serve the last known list immediately so the picker is usable
+            // while the network catches up.
+            if (modelsState.value.models.isEmpty()) {
+                val cached = settings.cachedModels(p)
+                if (cached.isNotEmpty()) {
+                    modelsState.value = ModelsUi(models = cached.map { restoreOption(p, it) })
+                }
+            }
+
+            val age = System.currentTimeMillis() - settings.modelsFetchedAt(p)
+            if (!force && modelsState.value.models.isNotEmpty() && age < MODELS_TTL_MS) return@launch
+
+            val hasSomething = modelsState.value.models.isNotEmpty()
+            modelsState.update { it.copy(loading = !hasSomething, refreshing = hasSomething, error = null) }
             try {
                 val list = withContext(Dispatchers.IO) { ai.listModels(p, key) }
                 modelsState.value = ModelsUi(models = list)
-                if (list.isNotEmpty() && model.value !in list) {
+                settings.cacheModels(p, list.map { it.id }, System.currentTimeMillis())
+                val ids = list.map { it.id }
+                if (ids.isNotEmpty() && model.value !in ids) {
                     val preferred = SettingsRepository.defaultModel(p)
-                    settings.setModel(if (preferred in list) preferred else list.first())
+                    settings.setModel(if (preferred in ids) preferred else ids.first())
                 }
             } catch (e: Exception) {
-                modelsState.value = ModelsUi(error = e.message?.take(120) ?: "Couldn't fetch models")
+                // A failed refresh must not throw away a list that still works.
+                // Offline, the cached models are exactly what the user needs.
+                modelsState.update {
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        error = e.message?.take(120) ?: "Couldn't fetch models",
+                    )
+                }
             }
         }
     }
+
+    /**
+     * Rebuilds a picker entry from a cached id. Price detail is lost until the
+     * refresh lands — it isn't cached — but "recommended" is derivable from the
+     * id, so the shortlist survives a cold offline start.
+     */
+    private fun restoreOption(provider: String, id: String): ModelOption =
+        if (provider == SettingsRepository.PROVIDER_OPENROUTER) {
+            ModelOption(id = id, recommended = OpenRouterCatalog.isRecommended(id))
+        } else {
+            ModelOption(id)
+        }
 
     // ── Ask Tend ────────────────────────────────────────────────
     fun openAi() {
@@ -750,7 +810,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // If the model list is loaded and the saved model isn't in it (retired
                 // or filtered out as unstable), fall back to a working one for this call
                 // and persist the correction.
-                val loaded = modelsState.value.models
+                val loaded = modelsState.value.ids
                 val effectiveModel = when {
                     loaded.isEmpty() || model.value in loaded -> model.value
                     else -> (loaded.firstOrNull { it == SettingsRepository.defaultModel(aiProvider) }
@@ -860,6 +920,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         /** Streak lengths worth interrupting the screen for. */
         val STREAK_MILESTONES = setOf(3, 7, 14, 30, 50, 100, 150, 200, 365)
+
+        /** How long a fetched model list stays fresh before a background refresh. */
+        const val MODELS_TTL_MS = 5 * 60 * 1000L
 
         /** How long to wait for a check-off to surface through Room before giving up. */
         const val WRITE_SETTLE_MS = 1_500L
