@@ -94,6 +94,18 @@ from the repo.
      rather than naming a single vendor.
    - Calendar: read on-device only, never leaves the device.
    - Backups: written to storage the user chooses, never uploaded by Tend.
+   - **Memory vault**: encrypted at rest with a key derived from the user's
+     password. Declare it as data stored on-device and encrypted; it is never
+     transmitted, is excluded from backup files, and the app itself cannot read
+     it while locked. Answer "yes" to *Is all user data encrypted in transit?*
+     only in respect of the AI calls, which are HTTPS.
+   - **Chat history and attachments**: stored on-device. Chat text is included
+     in backup files; vault contents are not.
+   - **Optional OCR** adds a Google Play services dependency
+     (`play-services-mlkit-text-recognition`). It is off by default and the
+     model downloads on first use. Recognition runs on-device — no image is
+     uploaded — but the *model download* is a network request to Google, so if
+     the listing claims "works entirely offline", qualify it.
 7. **Content rating questionnaire**, target audience, and ads declaration (no
    ads).
 8. **Store listing assets** — the one genuinely missing deliverable:
