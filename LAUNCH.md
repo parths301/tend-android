@@ -15,12 +15,20 @@ Every feature from the original design brief is built and wired to real data.
 | Home-screen widgets (Today, Streak) | Done — Glance, one-tap check-off |
 | Reminders, nightly check-in, boot re-arm | Done — single chained alarm, inexact fallback |
 | Calendar read + Auto-plan around events | Done — runtime permission, read-only |
-| Ask Tend (BYOK Gemini / Claude) | Done — offline parser without a key |
+| Ask Tend (BYOK Gemini / Claude / OpenRouter) | Done — offline rules without a key |
+| Persisted chat: threads, selection, delete, drafts | Done — Room-backed, survives process death |
+| AI / Offline mode toggle, one execution pipeline | Done — `AiExecutionRouter` is the only dispatcher |
+| Clickable links to chat-created tasks/habits/plans | Done — stored ids, not text matching |
+| Chat sheet ↔ full screen | Done — one implementation, two sizes |
+| Encrypted Memory vault + recovery code | Done — PBKDF2/AES-GCM, excluded from AI structurally |
+| Attachments in chat and Memory | Done — one shared rendering primitive |
+| System status, advanced prompt/JSON, personalities | Done — validated, resettable, both modes |
+| Fast time input (type / drag / step) | Done — one component, all five call sites |
 | Daily-plan PDF export | Done |
 | **Backup & restore (JSON, scheduled)** | **Done — new in 2.1.0, see §2** |
 | Release signing config | Done — reads `keystore.properties` |
 | Auto-backup exclusion for the encrypted key | Done |
-| Unit tests in CI | Done — `testDebugUnitTest` on every push |
+| Unit tests in CI | Done — 92 tests on every push, incl. migration schema diff |
 
 Nothing in the feature brief is outstanding. What remains is release plumbing
 and store paperwork.
@@ -137,6 +145,77 @@ behaves. Before submitting, on a physical phone:
       the exact-alarm permission.
 - [ ] Add an API key, run Ask Tend and Auto-plan.
 - [ ] Rotate the device, go through every tab, back out of Settings and Detail.
+
+### Chat, Memory and settings (new in this release)
+
+**Modes**
+- [ ] With no key: the toggle shows AI but the chat says it's running offline,
+      and replies are the rule engine's.
+- [ ] Add a key, pick AI: replies come from the model and messages carry an
+      "AI" tag; offline replies carry "OFFLINE".
+- [ ] Switch to Offline with a key present: it stays offline. The choice sticks.
+
+**Threads**
+- [ ] New chat, send a message, force-stop the app, reopen — the thread and its
+      messages are still there.
+- [ ] Create two threads, switch between them, confirm each keeps its own draft.
+- [ ] Rename, pin, and search a thread.
+- [ ] **Clear chat** empties the thread but keeps it; **delete thread** removes
+      it. Confirm they are genuinely different.
+
+**Messages**
+- [ ] Long-press a message → delete it. The task it created is still in Tasks.
+- [ ] Select several messages, delete in bulk.
+- [ ] Long-press → "Add to AI context": the message turns teal and stays that
+      way after switching threads and back.
+- [ ] In Offline mode, mark a message like "gym every morning", then send
+      "add that" — it should create the habit, not a task called "That".
+
+**Linked items**
+- [ ] Create a task from chat, tap its chip → the task's editor opens.
+- [ ] Rename that task in Tasks, return to the chat, tap the chip again → it
+      still opens the right task.
+- [ ] Delete the task, tap the chip → a clear "that task has been deleted"
+      message, not a blank screen or a crash.
+
+**Sheet ↔ full screen**
+- [ ] Type a draft, attach a file, expand to full screen — both survive.
+- [ ] Collapse back; back button collapses before it closes.
+
+**Memory**
+- [ ] Create a vault; write down the recovery code shown.
+- [ ] Lock it, unlock with the password; lock again, unlock with the code.
+- [ ] Wrong password shows an error and does not unlock.
+- [ ] `add to memory the spare key is with Sam`, then `search memory spare` —
+      the reply summarises the hit rather than pasting the contents.
+- [ ] With **AI mode on and a key set**, run a memory command and confirm no
+      network call is made (airplane mode is the easy check: it still works).
+- [ ] Add an image with OCR off, then on, and confirm the toggle changes whether
+      text inside the image is findable.
+- [ ] Change the password, confirm existing entries still open.
+
+**Settings**
+- [ ] Every System Status row matches reality; toggle something and watch it
+      change.
+- [ ] The API key row never shows any part of the key.
+- [ ] Advanced → JSON config: type `{"historyWindow": 999}` and confirm it
+      refuses to save with a reason; reset restores the default.
+- [ ] Advanced → prompt: save a custom prompt, send a message, reset it.
+- [ ] Pick the "Brief" personality and confirm replies shorten **in both modes**.
+- [ ] Force-stop and reopen: every setting above survived.
+
+**Time input**
+- [ ] Tap the time, type `930`, confirm it becomes 9:30 AM.
+- [ ] Type nonsense, confirm the old value stands rather than becoming midnight.
+- [ ] Drag the track; confirm haptic ticks and that +/− still work.
+- [ ] Check all five places: check-in, backup time, task due, plan start, habit
+      reminder.
+
+**Migration (the one that can't be tested in CI)**
+- [ ] Install the *previous* release, add a few habits and tasks, then install
+      this build over it. The app must open with the old data intact — this is
+      the v2→v3→v4 migration path, and it only ever runs on a device that
+      already has data.
 
 ---
 
