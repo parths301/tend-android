@@ -152,6 +152,23 @@ class MemoryRepository(
         true
     }
 
+    /**
+     * Edits an entry's title and body/caption in place. Everything else about
+     * the row — kind, blob, filename, OCR text, timestamp — is untouched, so
+     * fixing a typo in a caption never re-imports the attached file.
+     */
+    suspend fun updateText(id: Long, title: String, body: String): Boolean = withContext(Dispatchers.IO) {
+        val key = session.requireKey() ?: return@withContext false
+        val entry = dao.entryById(id) ?: return@withContext false
+        dao.update(
+            entry.copy(
+                sealedTitle = VaultCrypto.sealText(key, title),
+                sealedBody = VaultCrypto.sealText(key, body),
+            )
+        )
+        true
+    }
+
     // ── reading ─────────────────────────────────────────────────
 
     suspend fun items(): List<MemoryItem> = withContext(Dispatchers.IO) {

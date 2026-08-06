@@ -186,6 +186,7 @@ private fun UnlockedVault(vm: MainViewModel) {
     var query by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(MemoryCategoryFilter.All) }
     var adding by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<MemoryItem?>(null) }
     var confirmDelete by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(query) { vm.refreshMemory(query) }
@@ -297,6 +298,7 @@ private fun UnlockedVault(vm: MainViewModel) {
                                 clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
                             }
                         },
+                        onEdit = { editing = item },
                         onDelete = { confirmDelete = item.id },
                     )
                 }
@@ -305,9 +307,21 @@ private fun UnlockedVault(vm: MainViewModel) {
     }
 
     if (adding) {
-        AddNoteDialog(
+        NoteDialog(
+            heading = "Add to Memory",
             onSave = { title, body -> vm.addMemoryNote(title, body); adding = false },
             onDismiss = { adding = false },
+        )
+    }
+
+    editing?.let { item ->
+        NoteDialog(
+            heading = "Edit entry",
+            initialTitle = item.title,
+            initialBody = item.body,
+            saveLabel = "Save changes",
+            onSave = { title, body -> vm.editMemory(item.id, title, body); editing = null },
+            onDismiss = { editing = null },
         )
     }
 
@@ -324,7 +338,7 @@ private fun UnlockedVault(vm: MainViewModel) {
 }
 
 @Composable
-private fun MemoryRow(item: MemoryItem, onCopy: () -> Unit, onDelete: () -> Unit) {
+private fun MemoryRow(item: MemoryItem, onCopy: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -367,6 +381,13 @@ private fun MemoryRow(item: MemoryItem, onCopy: () -> Unit, onDelete: () -> Unit
                 .padding(horizontal = 4.dp),
         )
         Text(
+            "✎",
+            fontSize = 12.sp,
+            modifier = Modifier
+                .tapNoRipple(TendHaptic.Select, onEdit)
+                .padding(horizontal = 4.dp),
+        )
+        Text(
             "🗑",
             fontSize = 12.sp,
             modifier = Modifier.tapNoRipple(TendHaptic.Select, onDelete),
@@ -400,18 +421,26 @@ private fun RecoveryCodeDialog(code: String, onDismiss: () -> Unit) {
     }
 }
 
+/** Shared by "Add note" and "Edit entry" — the only difference is what it starts with and says. */
 @Composable
-private fun AddNoteDialog(onSave: (String, String) -> Unit, onDismiss: () -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var body by remember { mutableStateOf("") }
+private fun NoteDialog(
+    heading: String,
+    initialTitle: String = "",
+    initialBody: String = "",
+    saveLabel: String = "Save",
+    onSave: (String, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var title by remember { mutableStateOf(initialTitle) }
+    var body by remember { mutableStateOf(initialBody) }
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         TendCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Add to Memory", fontFamily = SpaceGrotesk, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(heading, fontFamily = SpaceGrotesk, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 DialogInput(title, { title = it }, "Title (optional)")
                 DialogInput(body, { body = it }, "What should Tend remember?")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Action("Save", enabled = body.isNotBlank()) { onSave(title, body) }
+                    Action(saveLabel, enabled = body.isNotBlank()) { onSave(title, body) }
                     Outline("Cancel", onDismiss)
                 }
             }

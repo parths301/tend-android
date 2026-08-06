@@ -1292,6 +1292,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun editMemory(id: Long, title: String, body: String) {
+        viewModelScope.launch {
+            memoryRepo.updateText(id, title, body)
+            refreshMemory("")
+        }
+    }
+
     suspend fun memoryBlob(id: Long): ByteArray? = memoryRepo.readBlob(id)
 
     /**
