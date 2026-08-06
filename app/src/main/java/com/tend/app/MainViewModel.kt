@@ -861,6 +861,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 BackupManager.restore(getApplication(), pending.snapshot)
+                // The restore may have rewritten the vault's key material on
+                // disk out from under this running session — resync rather
+                // than let the in-memory state (and any unlocked key) drift
+                // from what's now actually on disk.
+                vaultSession.lock()
+                memoryResultsState.value = emptyList()
                 repo.materializeHabitBlocks(today)
                 shellState.update { it.copy(tab = Tab.Today, detailHabitId = 1L) }
                 // Re-resolve rather than wipe: a restore replaces the chat tables
@@ -1287,6 +1293,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun memoryBlob(id: Long): ByteArray? = memoryRepo.readBlob(id)
+
+    /**
+     * Copies an already-sent message — and any attachments it carries — into
+     * Memory. The chat-command path only reaches text typed in the same turn
+     * as a pending attachment; this is the other way in, for something the
+     * user already sent or received and only later decided was worth keeping
+     * encrypted. Returns a string for the caller to show as a transient notice.
+     */
+    suspend fun saveMessageToMemory(messageId: Long): String {
+        if (vaultSession.state.value != VaultState.Unlocked) {
+            return if (vaultSession.isSetUp()) {
+                "Memory is locked. Open it from Settings → Memory to unlock, then try again."
+            } else {
+                "There's no Memory vault yet. Create one in Settings → Memory first."
+            }
+        }
+        val msg = chat.value.firstOrNull { it.message.id == messageId } ?: return "That message is gone."
+
+        var noteSaved = false
+        if (msg.text.isNotBlank()) {
+            memoryRepo.addText(msg.text.take(60), msg.text)
+            noteSaved = true
+        }
+        var fileCount = 0
+        for (att in msg.attachments) {
+            val uri = Uri.parse(att.uri)
+            val ocr = if (ocrEnabled.value && att.mime.startsWith("image/")) {
+                withContext(Dispatchers.Default) { OcrExtractor.extract(getApplication(), uri) }
+            } else {
+                null
+            }
+            memoryRepo.addFile(
+                uri = uri,
+                displayName = att.displayName,
+                mime = att.mime,
+                caption = msg.text.ifBlank { att.displayName },
+                ocrText = ocr.orEmpty(),
+            )
+            fileCount++
+        }
+        if (!noteSaved && fileCount == 0) return "Nothing to save."
+        refreshMemory("")
+        val details = listOfNotNull(
+            "message".takeIf { noteSaved },
+            "$fileCount file(s)".takeIf { fileCount > 0 },
+        ).joinToString(" and ")
+        return "Saved $details to Memory, encrypted."
+    }
 
     /**
      * Runs a vault command typed into the chat and returns the reply to show.

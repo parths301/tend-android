@@ -273,6 +273,10 @@ interface MemoryDao {
     @Insert
     suspend fun insert(entry: MemoryEntry): Long
 
+    /** Restore only — preserves the ids a backup captured, same as every other table. */
+    @Insert
+    suspend fun insertAll(entries: List<MemoryEntry>)
+
     @Update
     suspend fun update(entry: MemoryEntry)
 

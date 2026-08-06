@@ -186,6 +186,7 @@ fun LinkedEntityChip(ref: EntityRef, onClick: () -> Unit) {
 fun MessageActionSheet(
     inContext: Boolean,
     onAddToContext: () -> Unit,
+    onSaveToMemory: () -> Unit,
     onDelete: () -> Unit,
     onSelect: () -> Unit,
     onDismiss: () -> Unit,
@@ -201,6 +202,7 @@ fun MessageActionSheet(
         ActionText(if (inContext) "Remove from context" else "Add to AI context", Modifier.weight(1f)) {
             onAddToContext(); onDismiss()
         }
+        ActionText("Remember", Modifier.weight(1f)) { onSaveToMemory(); onDismiss() }
         ActionText("Select", Modifier.weight(1f)) { onSelect(); onDismiss() }
         ActionText("Delete", Modifier.weight(1f), Terracotta) { onDelete(); onDismiss() }
     }

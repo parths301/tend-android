@@ -8,6 +8,10 @@ import androidx.room.withTransaction
 import com.tend.app.BuildConfig
 import com.tend.app.data.SettingsRepository
 import com.tend.app.data.db.AppDatabase
+import com.tend.app.data.vault.MemoryRepository
+import com.tend.app.data.vault.VaultCrypto
+import com.tend.app.data.vault.VaultKeyMaterial
+import com.tend.app.data.vault.VaultSession
 import com.tend.app.notif.ReminderScheduler
 import com.tend.app.widget.TendWidgets
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +52,41 @@ object BackupManager {
 
     suspend fun snapshot(context: Context): BackupSnapshot = withContext(Dispatchers.IO) {
         val db = AppDatabase.get(context)
+        val vaultSession = VaultSession(context)
+        val memoryRepo = MemoryRepository(context, db, vaultSession)
+
+        // Ciphertext only — a locked vault backs up exactly as completely as an
+        // unlocked one, because nothing here is ever decrypted.
+        val memoryEntries = memoryRepo.entriesForBackup().map { entry ->
+            val sealedBlob = entry.blobPath.takeIf { it.isNotEmpty() }
+                ?.let { memoryRepo.rawBlob(it) }
+                ?.let { VaultCrypto.encode(it) }
+                .orEmpty()
+            BackupMemoryEntry(
+                id = entry.id,
+                createdAt = entry.createdAt,
+                kind = entry.kind,
+                sizeBytes = entry.sizeBytes,
+                sealedTitle = entry.sealedTitle,
+                sealedBody = entry.sealedBody,
+                sealedFileName = entry.sealedFileName,
+                sealedOcrText = entry.sealedOcrText,
+                blobPath = entry.blobPath,
+                mime = entry.mime,
+                sealedBlobBase64 = sealedBlob,
+            )
+        }
+        val vaultKeyMaterial = vaultSession.exportKeyMaterial()?.let {
+            BackupVaultKeyMaterial(
+                saltPassword = it.saltPassword,
+                saltRecovery = it.saltRecovery,
+                iterations = it.iterations,
+                wrappedPassword = it.wrappedPassword,
+                wrappedRecovery = it.wrappedRecovery,
+                verifier = it.verifier,
+            )
+        }
+
         BackupSnapshot(
             createdAtMillis = System.currentTimeMillis(),
             appVersion = BuildConfig.VERSION_NAME,
@@ -60,6 +99,8 @@ object BackupManager {
             threads = db.chatDao().threadsOnce(),
             messages = db.chatDao().allMessagesOnce(),
             links = db.chatDao().allLinksOnce(),
+            memoryEntries = memoryEntries,
+            vaultKeyMaterial = vaultKeyMaterial,
         )
     }
 
@@ -236,10 +277,53 @@ object BackupManager {
 
         clean.settings?.let { SettingsRepository(context).applySnapshot(it) }
 
+        // Memory. A pre-v3 backup never described the vault at all — it isn't
+        // "restore to an empty vault", it's silence, and silence must not wipe
+        // whatever the device already has. Only a v3+ backup gets to make that
+        // call, same as it can for every other table.
+        if (clean.formatVersion >= 3) {
+            // Rows and blob files aren't part of the transaction above — like
+            // the vault's own destroyEverything(), the filesystem side of this
+            // was never transactional — but the same clear-then-insert shape.
+            val memoryRepo = MemoryRepository(context, db, VaultSession(context))
+            val blobs = clean.memoryEntries
+                .filter { it.blobPath.isNotEmpty() && it.sealedBlobBase64.isNotEmpty() }
+                .associate { it.blobPath to VaultCrypto.decode(it.sealedBlobBase64) }
+            memoryRepo.restoreFromBackup(
+                entries = clean.memoryEntries.map { it.toEntity() },
+                blobs = blobs,
+            )
+            clean.vaultKeyMaterial?.let { m ->
+                VaultSession(context).importKeyMaterial(
+                    VaultKeyMaterial(
+                        saltPassword = m.saltPassword,
+                        saltRecovery = m.saltRecovery,
+                        iterations = m.iterations,
+                        wrappedPassword = m.wrappedPassword,
+                        wrappedRecovery = m.wrappedRecovery,
+                        verifier = m.verifier,
+                    )
+                )
+            }
+        }
+
         // Everything downstream of the data has to catch up.
         TendWidgets.refresh(context)
         ReminderScheduler.reschedule(context)
     }
+
+    private fun BackupMemoryEntry.toEntity() = com.tend.app.data.db.MemoryEntry(
+        id = id,
+        createdAt = createdAt,
+        kind = kind,
+        sizeBytes = sizeBytes,
+        sealedTitle = sealedTitle,
+        sealedBody = sealedBody,
+        sealedFileName = sealedFileName,
+        sealedOcrText = sealedOcrText,
+        blobPath = blobPath,
+        mime = mime,
+    )
 
     // ── one-off share ───────────────────────────────────────────
 

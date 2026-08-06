@@ -142,8 +142,9 @@ data class MessageLink(
  * thing it is, how big the payload is — because those are needed to list and
  * sort the vault while it is locked, and none of them reveal content.
  *
- * Attachment bytes are not in this row: they live in `filesDir/vault` written
- * through `EncryptedFile`, and [blobPath] names the file.
+ * Attachment bytes are not in this row: they live in `filesDir/vault`, sealed
+ * under the vault's data key the same way the text fields above are, and
+ * [blobPath] names the file.
  */
 @Entity(tableName = "memory_entries")
 data class MemoryEntry(

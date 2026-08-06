@@ -89,6 +89,27 @@ class MemoryIsolationTest {
     }
 
     @Test
+    fun `sensitive digit guard catches spaced and dashed card and aadhaar numbers`() {
+        listOf(
+            "my card is 4111 1111 1111 1111",
+            "card: 4111-1111-1111-1111",
+            "aadhaar 1234 5678 9012",
+        ).forEach { input ->
+            assertTrue("Should be flagged sensitive: $input", com.tend.app.ai.AiProtocol.isSensitive(input))
+        }
+    }
+
+    @Test
+    fun `sensitive digit guard ignores digits embedded in an alphanumeric id`() {
+        listOf(
+            "order id is ORD123456789012",
+            "invoice#123456789012XY",
+        ).forEach { input ->
+            assertFalse("Should not be flagged: $input", com.tend.app.ai.AiProtocol.isSensitive(input))
+        }
+    }
+
+    @Test
     fun `ordinary messages are not mistaken for vault commands`() {
         // These mention memory but are not instructions about the vault; treating
         // them as commands would silently swallow a real request.

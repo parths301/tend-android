@@ -2,8 +2,10 @@ package com.tend.app
 
 import com.tend.app.data.backup.BackupFormat
 import com.tend.app.data.backup.BackupFormatException
+import com.tend.app.data.backup.BackupMemoryEntry
 import com.tend.app.data.backup.BackupSettings
 import com.tend.app.data.backup.BackupSnapshot
+import com.tend.app.data.backup.BackupVaultKeyMaterial
 import com.tend.app.data.db.ChatMessage
 import com.tend.app.data.db.ChatThread
 import com.tend.app.data.db.Habit
@@ -69,6 +71,68 @@ class BackupFormatTest {
             MessageLink(id = 70, messageId = 61, entityType = "task", entityId = 20, label = "Buy groceries", createdAt = 2L),
         ),
     )
+
+    private fun withMemory(): BackupSnapshot = sample().copy(
+        memoryEntries = listOf(
+            BackupMemoryEntry(
+                id = 80, createdAt = 1L, kind = "text", sizeBytes = 0,
+                sealedTitle = "cipher-title", sealedBody = "cipher-body",
+                sealedFileName = "", sealedOcrText = "", blobPath = "", mime = "",
+                sealedBlobBase64 = "",
+            ),
+            BackupMemoryEntry(
+                id = 81, createdAt = 2L, kind = "image", sizeBytes = 4,
+                sealedTitle = "cipher-title-2", sealedBody = "cipher-caption",
+                sealedFileName = "cipher-name", sealedOcrText = "cipher-ocr",
+                blobPath = "abc.bin", mime = "image/jpeg",
+                sealedBlobBase64 = "c2VhbGVkLWJ5dGVz",
+            ),
+        ),
+        vaultKeyMaterial = BackupVaultKeyMaterial(
+            saltPassword = "salt-p", saltRecovery = "salt-r", iterations = 210_000,
+            wrappedPassword = "wrapped-p", wrappedRecovery = "wrapped-r", verifier = "verifier",
+        ),
+    )
+
+    @Test
+    fun `round trips memory entries and vault key material`() {
+        val decoded = BackupFormat.decode(BackupFormat.encode(withMemory()))
+
+        assertEquals(2, decoded.memoryEntries.size)
+        assertEquals("cipher-title", decoded.memoryEntries[0].sealedTitle)
+        assertEquals("abc.bin", decoded.memoryEntries[1].blobPath)
+        assertEquals("c2VhbGVkLWJ5dGVz", decoded.memoryEntries[1].sealedBlobBase64)
+        assertNotNull(decoded.vaultKeyMaterial)
+        assertEquals("wrapped-p", decoded.vaultKeyMaterial!!.wrappedPassword)
+        assertEquals(BackupFormat.VERSION, decoded.formatVersion)
+    }
+
+    @Test
+    fun `a pre-v3 file has no opinion about memory, not an empty one`() {
+        // A backup written before Memory existed must decode as "unknown", so
+        // restore knows not to wipe whatever vault the device already has —
+        // very different from a v3 backup whose vault was genuinely empty.
+        val v2 = BackupFormat.encode(sample())
+            .replace("\"version\": ${BackupFormat.VERSION}", "\"version\": 2")
+        val decoded = BackupFormat.decode(v2)
+        assertEquals(2, decoded.formatVersion)
+        assertTrue(decoded.memoryEntries.isEmpty())
+        assertNull(decoded.vaultKeyMaterial)
+    }
+
+    @Test
+    fun `flags memory entries with no key material to unlock them`() {
+        val orphaned = withMemory().copy(vaultKeyMaterial = null)
+        val problems = BackupFormat.problems(orphaned)
+        assertTrue(problems.any { it.contains("key material") })
+    }
+
+    @Test
+    fun `sanitize drops duplicate memory entry ids`() {
+        val dupes = withMemory().let { it.copy(memoryEntries = it.memoryEntries + it.memoryEntries[0]) }
+        val clean = BackupFormat.sanitize(dupes)
+        assertEquals(2, clean.memoryEntries.size)
+    }
 
     @Test
     fun `round trips chat threads, messages and links`() {

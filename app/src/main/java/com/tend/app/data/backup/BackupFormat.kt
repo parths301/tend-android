@@ -12,6 +12,40 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
+/**
+ * A vault entry as a backup carries it: every user-supplied field already
+ * ciphertext, exactly as it sits in `memory_entries` and `filesDir/vault`.
+ * Nothing here is decrypted at backup time — a locked vault backs up fine.
+ */
+data class BackupMemoryEntry(
+    val id: Long,
+    val createdAt: Long,
+    val kind: String,
+    val sizeBytes: Long,
+    val sealedTitle: String,
+    val sealedBody: String,
+    val sealedFileName: String,
+    val sealedOcrText: String,
+    val blobPath: String,
+    val mime: String,
+    /** Base64 of the sealed blob file's bytes; empty when [blobPath] is empty. */
+    val sealedBlobBase64: String,
+)
+
+/**
+ * What unlocks the vault again after a restore — safe alongside ciphertext
+ * because every field is itself wrapped under the user's password or
+ * recovery code. See [com.tend.app.data.vault.VaultKeyMaterial].
+ */
+data class BackupVaultKeyMaterial(
+    val saltPassword: String,
+    val saltRecovery: String,
+    val iterations: Int,
+    val wrappedPassword: String,
+    val wrappedRecovery: String,
+    val verifier: String,
+)
+
 /** Everything a Tend backup carries, minus secrets. */
 data class BackupSettings(
     val heatmapWeeks: Int,
@@ -37,10 +71,20 @@ data class BackupSnapshot(
     val threads: List<ChatThread> = emptyList(),
     val messages: List<ChatMessage> = emptyList(),
     val links: List<MessageLink> = emptyList(),
+    val memoryEntries: List<BackupMemoryEntry> = emptyList(),
+    val vaultKeyMaterial: BackupVaultKeyMaterial? = null,
+    /**
+     * The format version this snapshot was read at, or [BackupFormat.VERSION]
+     * for one just captured from the running app. Restore needs this to tell
+     * "an old backup that never described Memory" from "a v3+ backup whose
+     * vault happened to be empty" — those call for opposite behaviour, and
+     * [memoryEntries] alone can't distinguish them.
+     */
+    val formatVersion: Int = BackupFormat.VERSION,
 ) {
     val rowCount: Int
         get() = habits.size + logs.size + tasks.size + plans.size + notes.size +
-            threads.size + messages.size
+            threads.size + messages.size + memoryEntries.size
 }
 
 class BackupFormatException(message: String) : Exception(message)
@@ -58,12 +102,13 @@ object BackupFormat {
     const val FORMAT = "tend-backup"
 
     /**
-     * v2 adds chat threads, messages and entity links.
+     * v3 adds Memory vault entries and the key material that unlocks them.
+     * v2 added chat threads, messages and entity links.
      *
-     * Readers still accept v1 — the chat arrays are simply absent and default to
-     * empty — so a backup taken before this release restores unchanged.
+     * Readers still accept v1 and v2 — the newer sections are simply absent and
+     * default to empty/null — so an older backup restores unchanged.
      */
-    const val VERSION = 2
+    const val VERSION = 3
     const val MIME = "application/json"
     const val FILE_PREFIX = "tend-backup-"
     const val FILE_SUFFIX = ".json"
@@ -84,7 +129,8 @@ object BackupFormat {
                 .put("planBlocks", snapshot.plans.size)
                 .put("notes", snapshot.notes.size)
                 .put("chatThreads", snapshot.threads.size)
-                .put("chatMessages", snapshot.messages.size),
+                .put("chatMessages", snapshot.messages.size)
+                .put("memoryEntries", snapshot.memoryEntries.size),
         )
 
         root.put(
@@ -209,6 +255,40 @@ object BackupFormat {
             )
         }
 
+        // Memory. Rows and blobs travel as ciphertext — nothing here is ever
+        // decrypted, so a locked vault backs up exactly as completely as an
+        // unlocked one. vaultKeyMaterial is what makes the ciphertext openable
+        // again; see BackupVaultKeyMaterial for why it's safe alongside it.
+        root.put(
+            "memoryEntries",
+            snapshot.memoryEntries.jsonArray {
+                put("id", it.id)
+                put("createdAt", it.createdAt)
+                put("kind", it.kind)
+                put("sizeBytes", it.sizeBytes)
+                put("sealedTitle", it.sealedTitle)
+                put("sealedBody", it.sealedBody)
+                put("sealedFileName", it.sealedFileName)
+                put("sealedOcrText", it.sealedOcrText)
+                put("blobPath", it.blobPath)
+                put("mime", it.mime)
+                put("sealedBlob", it.sealedBlobBase64)
+            },
+        )
+
+        snapshot.vaultKeyMaterial?.let { m ->
+            root.put(
+                "vaultKeyMaterial",
+                JSONObject()
+                    .put("saltPassword", m.saltPassword)
+                    .put("saltRecovery", m.saltRecovery)
+                    .put("iterations", m.iterations)
+                    .put("wrappedPassword", m.wrappedPassword)
+                    .put("wrappedRecovery", m.wrappedRecovery)
+                    .put("verifier", m.verifier),
+            )
+        }
+
         return root.toString(2)
     }
 
@@ -234,6 +314,7 @@ object BackupFormat {
         }
 
         return BackupSnapshot(
+            formatVersion = version,
             createdAtMillis = root.optLong("createdAt", 0L),
             appVersion = root.optString("appVersion", "unknown"),
             habits = root.rows("habits") {
@@ -324,6 +405,32 @@ object BackupFormat {
                     createdAt = it.optLong("createdAt", 0L),
                 )
             },
+            // Absent before v3; `rows` yields an empty list, which is correct.
+            memoryEntries = root.rows("memoryEntries") {
+                BackupMemoryEntry(
+                    id = it.getLong("id"),
+                    createdAt = it.optLong("createdAt", 0L),
+                    kind = it.optString("kind", "text"),
+                    sizeBytes = it.optLong("sizeBytes", 0L),
+                    sealedTitle = it.optString("sealedTitle", ""),
+                    sealedBody = it.optString("sealedBody", ""),
+                    sealedFileName = it.optString("sealedFileName", ""),
+                    sealedOcrText = it.optString("sealedOcrText", ""),
+                    blobPath = it.optString("blobPath", ""),
+                    mime = it.optString("mime", ""),
+                    sealedBlobBase64 = it.optString("sealedBlob", ""),
+                )
+            },
+            vaultKeyMaterial = root.optJSONObject("vaultKeyMaterial")?.let { m ->
+                BackupVaultKeyMaterial(
+                    saltPassword = m.optString("saltPassword", ""),
+                    saltRecovery = m.optString("saltRecovery", ""),
+                    iterations = m.optInt("iterations", 210_000),
+                    wrappedPassword = m.optString("wrappedPassword", ""),
+                    wrappedRecovery = m.optString("wrappedRecovery", ""),
+                    verifier = m.optString("verifier", ""),
+                )
+            },
             settings = root.optJSONObject("settings")?.let { s ->
                 BackupSettings(
                     heatmapWeeks = s.optInt("heatmapWeeks", 17),
@@ -355,6 +462,10 @@ object BackupFormat {
         if (orphanLogs > 0) problems += "$orphanLogs check-in${plural(orphanLogs)} reference a missing habit"
         if (orphanNotes > 0) problems += "$orphanNotes note${plural(orphanNotes)} reference a missing habit"
         if (snapshot.habits.size != habitIds.size) problems += "duplicate habit ids"
+        if (snapshot.memoryEntries.isNotEmpty() && snapshot.vaultKeyMaterial == null) {
+            problems += "${snapshot.memoryEntries.size} Memory item${plural(snapshot.memoryEntries.size)} " +
+                "have no vault key material and won't be unlockable after restore"
+        }
         return problems
     }
 
@@ -398,6 +509,7 @@ object BackupFormat {
             // whose *entity* is gone is kept on purpose — that is the deleted-item
             // case the chat is designed to report.
             links = snapshot.links.filter { it.messageId in messageIds },
+            memoryEntries = snapshot.memoryEntries.distinctBy { it.id },
         )
     }
 

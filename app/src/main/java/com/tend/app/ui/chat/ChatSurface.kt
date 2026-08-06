@@ -299,6 +299,9 @@ private fun ChatBody(vm: MainViewModel, listModifier: Modifier) {
                     MessageActionSheet(
                         inContext = msg.inContext,
                         onAddToContext = { vm.toggleInContext(msg.message.id) },
+                        onSaveToMemory = {
+                            scope.launch { notice = vm.saveMessageToMemory(msg.message.id) }
+                        },
                         onDelete = { vm.deleteMessage(msg.message.id) },
                         onSelect = { vm.toggleSelected(msg.message.id) },
                         onDismiss = { actionsFor = 0L },

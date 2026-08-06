@@ -2,8 +2,6 @@ package com.tend.app.data.vault
 
 import android.content.Context
 import android.net.Uri
-import androidx.security.crypto.EncryptedFile
-import androidx.security.crypto.MasterKey
 import com.tend.app.data.db.AppDatabase
 import com.tend.app.data.db.MemoryEntry
 import kotlinx.coroutines.Dispatchers
@@ -37,8 +35,15 @@ data class MemoryItem(
  * | | |
  * |---|---|
  * | Titles, bodies, captions, filenames, OCR text | AES-GCM under the vault DEK, in `memory_entries` |
- * | Image and file bytes | `EncryptedFile` under `filesDir/vault/` |
+ * | Image and file bytes | AES-GCM under the same vault DEK, as raw sealed files in `filesDir/vault/` |
  * | Timestamps, kind, size, MIME | plaintext, so a locked vault can still be listed |
+ *
+ * Blobs use [VaultCrypto] directly rather than Android's `EncryptedFile` on
+ * purpose: `EncryptedFile`'s key lives in the Keystore, which does not survive
+ * a reinstall, so a blob sealed under it could never be included in a backup.
+ * Sealing with the same password-derived DEK the text fields already use makes
+ * a blob exactly as portable as a title — copy the bytes, and whatever unlocks
+ * the vault elsewhere unlocks the file too.
  *
  * ## Search, and the tradeoff it makes
  *
@@ -72,13 +77,7 @@ class MemoryRepository(
 
     private val dao = db.memoryDao()
 
-    private val vaultDir: File by lazy {
-        File(context.filesDir, "vault").apply { mkdirs() }
-    }
-
-    private val masterKey: MasterKey by lazy {
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-    }
+    private val vaultDir: File by lazy { vaultDir(context) }
 
     /** Ciphertext rows — safe to observe while locked, for a count or a list length. */
     fun rawEntries(): Flow<List<MemoryEntry>> = dao.entries()
@@ -118,10 +117,13 @@ class MemoryRepository(
         val blobName = "${UUID.randomUUID()}.bin"
         val target = File(vaultDir, blobName)
 
-        val written = try {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                encryptedFile(target).openFileOutput().use { output -> input.copyTo(output) }
-            } ?: return@withContext null
+        val bytes = try {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@withContext null
+        } catch (e: Exception) {
+            return@withContext null
+        }
+        try {
+            target.writeBytes(VaultCrypto.seal(key, bytes))
         } catch (e: Exception) {
             target.delete()
             return@withContext null
@@ -131,7 +133,7 @@ class MemoryRepository(
             MemoryEntry(
                 createdAt = System.currentTimeMillis(),
                 kind = if (mime.startsWith("image/")) KIND_IMAGE else KIND_FILE,
-                sizeBytes = written,
+                sizeBytes = bytes.size.toLong(),
                 sealedTitle = VaultCrypto.sealText(key, displayName),
                 sealedBody = VaultCrypto.sealText(key, caption),
                 sealedFileName = VaultCrypto.sealText(key, displayName),
@@ -175,13 +177,13 @@ class MemoryRepository(
 
     /** Decrypted bytes of an entry's blob, for display. Null when locked. */
     suspend fun readBlob(id: Long): ByteArray? = withContext(Dispatchers.IO) {
-        session.requireKey() ?: return@withContext null
+        val key = session.requireKey() ?: return@withContext null
         val entry = dao.entryById(id) ?: return@withContext null
         if (entry.blobPath.isEmpty()) return@withContext null
         val file = File(vaultDir, entry.blobPath)
         if (!file.exists()) return@withContext null
         try {
-            encryptedFile(file).openFileInput().use { it.readBytes() }
+            VaultCrypto.open(key, file.readBytes())
         } catch (e: Exception) {
             null
         }
@@ -208,13 +210,36 @@ class MemoryRepository(
         session.destroy()
     }
 
-    private fun encryptedFile(file: File): EncryptedFile =
-        EncryptedFile.Builder(
-            context,
-            file,
-            masterKey,
-            EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB,
-        ).build()
+    // ── backup / restore ────────────────────────────────────────
+    //
+    // Both sides of a backup move ciphertext only — rows and blob bytes are
+    // already sealed under the vault DEK on disk, so neither export nor
+    // import needs the vault unlocked. What makes the copy usable again is
+    // [VaultSession]'s key material travelling in the same backup.
+
+    /** Every row, ciphertext and all — the same shape a backup embeds. */
+    suspend fun entriesForBackup(): List<MemoryEntry> = withContext(Dispatchers.IO) { dao.entriesOnce() }
+
+    /** The sealed bytes of a blob exactly as stored, for [entriesForBackup] rows that have one. */
+    suspend fun rawBlob(blobPath: String): ByteArray? = withContext(Dispatchers.IO) {
+        if (blobPath.isEmpty()) return@withContext null
+        val file = File(vaultDir, blobPath)
+        if (!file.exists()) return@withContext null
+        try {
+            file.readBytes()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Replaces every entry and blob with what a backup captured. */
+    suspend fun restoreFromBackup(entries: List<MemoryEntry>, blobs: Map<String, ByteArray>) =
+        withContext(Dispatchers.IO) {
+            dao.clear()
+            vaultDir.listFiles()?.forEach { it.delete() }
+            if (entries.isNotEmpty()) dao.insertAll(entries)
+            blobs.forEach { (path, bytes) -> File(vaultDir, path).writeBytes(bytes) }
+        }
 
     private fun decrypt(entry: MemoryEntry, key: SecretKey): MemoryItem? {
         // A row that will not decrypt is corrupt or from a destroyed vault;
@@ -241,5 +266,8 @@ class MemoryRepository(
         const val KIND_TEXT = "text"
         const val KIND_IMAGE = "image"
         const val KIND_FILE = "file"
+
+        /** Where blobs live, exposed so a caller with no repository instance (backup) can find them. */
+        fun vaultDir(context: Context): File = File(context.filesDir, "vault").apply { mkdirs() }
     }
 }

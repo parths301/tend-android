@@ -31,6 +31,14 @@ object AiProtocol {
         Current state:
         $stateSummary
 
+        The app also has a separate encrypted Memory vault you cannot see or write to —
+        it exists specifically so identifiers and secrets never pass through you or get
+        stored as plain text. If the user shares or asks to save something like an ID
+        number, card number, PIN, password, or similar secret, do NOT put it in a task,
+        plan, or habit, and do NOT repeat it back in your reply. Instead emit an empty
+        actions array and, in "reply", tell them to save it in Memory (Settings → Memory,
+        or by typing e.g. "remember ..." in this chat) instead.
+
         Respond ONLY with a single valid JSON object — no prose before or after, no
         markdown fences — in this exact shape:
         {"reply": "<1-2 friendly sentences saying exactly what you did>",
@@ -192,11 +200,31 @@ object AiProtocol {
         "(?i)\\bhabits?\\b|\\bevery ?day\\b|\\bdaily\\b|^\\s*(quit|stop)\\s+"
     )
 
-    private val sensitiveGuardRegex = Regex(
-        "(?i)\\b(?:aadhaar|ssn|social security|credit card|cvv|pin|password|passport|secret)\\b|\\b\\d{12}\\b|\\b\\d{16}\\b"
+    private val sensitiveKeywordRegex = Regex(
+        "(?i)\\b(?:aadhaar|ssn|social security|credit card|cvv|pin|password|passport|secret)\\b"
     )
 
-    fun isSensitive(text: String): Boolean = sensitiveGuardRegex.containsMatchIn(text)
+    /**
+     * A run of exactly 12 or 16 digits — an Aadhaar or card number — however it
+     * was typed. `[\d\s-]` covers the formatting people actually use ("4111
+     * 1111 1111 1111", "1234-5678-9012"), and the not-preceded/followed-by-\w
+     * checks stand in for `\b`, which can't be used here: `\b` only fires at a
+     * transition into or out of a word character, and every character this
+     * pattern matches (digits, and the spaces/dashes between them) already is
+     * or borders one, so a literal `\b` would never anchor where intended. The
+     * checks keep the same guarantee `\b` gave the old digits-only pattern: a
+     * number embedded in an alphanumeric id like "order123456789012" still
+     * doesn't match.
+     */
+    private val sensitiveDigitRunRegex = Regex("""(?<!\w)\d[\d\s-]{9,25}\d(?!\w)""")
+
+    fun isSensitive(text: String): Boolean {
+        if (sensitiveKeywordRegex.containsMatchIn(text)) return true
+        return sensitiveDigitRunRegex.findAll(text).any { match ->
+            val digitCount = match.value.count(Char::isDigit)
+            digitCount == 12 || digitCount == 16
+        }
+    }
 
     /**
      * Offline fallback — simple rules, no AI model involved:
