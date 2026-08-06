@@ -56,6 +56,7 @@ import com.tend.app.widget.TendWidgets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -593,7 +594,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleTask(task: TaskItem) = viewModelScope.launch { repo.toggleTask(task) }
     fun togglePlan(block: PlanBlock) = viewModelScope.launch { repo.togglePlan(block) }
 
-    fun addHabit(name: String, category: String, type: String, goal: String, reminderMin: Int? = null) {
+    fun addHabit(
+        name: String,
+        category: String,
+        type: String,
+        goal: String,
+        reminderMin: Int? = null,
+        colorHex: Long? = null,
+        glyph: String? = null,
+    ) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
@@ -603,6 +612,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 type,
                 createdDay = today,
                 reminderMin = reminderMin,
+                colorHex = colorHex,
+                glyph = glyph,
             )
             repo.materializeHabitBlocks(today)
             TendWidgets.refresh(getApplication())
@@ -668,6 +679,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun addCustomCategory(name: String) = viewModelScope.launch { settings.addCustomCategory(name) }
+
+    // ── attachments on habits, tasks and plan blocks ──────────────
+    //
+    // Same table and the same permission dance as a chat attachment
+    // (attachToDraft); the only difference is there's no draft step because
+    // the habit/task/plan already exists by the time it can be edited.
+
+    fun attachmentsFor(ownerType: String, ownerId: Long): Flow<List<Attachment>> =
+        repo.attachmentsFor(ownerType, ownerId)
+
+    fun addOwnerAttachment(ownerType: String, ownerId: Long, uri: Uri) {
+        val resolver = getApplication<Application>().contentResolver
+        runCatching { resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        val picked = readPickedFile(getApplication(), uri)
+        viewModelScope.launch {
+            repo.addAttachment(ownerType, ownerId, uri.toString(), picked.displayName, picked.mime, picked.sizeBytes)
+        }
+    }
+
+    fun removeAttachment(id: Long) = viewModelScope.launch { repo.deleteAttachment(id) }
 
     // ── auto-plan (AI) ──────────────────────────────────────────
     fun clearAutoPlanMessage() {

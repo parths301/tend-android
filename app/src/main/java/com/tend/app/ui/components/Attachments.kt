@@ -3,24 +3,32 @@ package com.tend.app.ui.components
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.tend.app.MainViewModel
 import com.tend.app.data.db.Attachment
 import com.tend.app.ui.motion.TendHaptic
 import com.tend.app.ui.theme.Card
@@ -164,4 +172,34 @@ private fun humanSize(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"
     bytes < 1024 * 1024 -> "${bytes / 1024} KB"
     else -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
+}
+
+/**
+ * "Files" for a habit, task or plan block — the same [AttachmentRow] chat and
+ * Memory already use, backed by the same generic `attachments` table keyed on
+ * [ownerType]/[ownerId]. One composable so the picker, permission handling and
+ * empty state can't drift between the three edit surfaces that embed it.
+ */
+@Composable
+fun AttachmentsSection(vm: MainViewModel, ownerType: String, ownerId: Long) {
+    val attachments by vm.attachmentsFor(ownerType, ownerId).collectAsStateWithLifecycle(initialValue = emptyList())
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { vm.addOwnerAttachment(ownerType, ownerId, it) }
+    }
+
+    Column {
+        Text(
+            "ATTACHMENTS", fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
+            color = Faint, modifier = Modifier.padding(start = 2.dp, bottom = 8.dp),
+        )
+        if (attachments.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                attachments.forEach { att ->
+                    AttachmentRow(att, onRemove = { vm.removeAttachment(att.id) })
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        DashedAddBox("Add a file") { picker.launch(arrayOf("*/*")) }
+    }
 }

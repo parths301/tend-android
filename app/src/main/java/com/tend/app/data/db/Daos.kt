@@ -229,6 +229,13 @@ interface ChatDao {
     @Query("SELECT * FROM attachments WHERE ownerType = :ownerType AND ownerId = :ownerId")
     suspend fun attachmentsFor(ownerType: String, ownerId: Long): List<Attachment>
 
+    /** Same table, reactively — for a habit/task/plan whose attachments a screen shows live. */
+    @Query("SELECT * FROM attachments WHERE ownerType = :ownerType AND ownerId = :ownerId ORDER BY createdAt")
+    fun attachmentsForOwner(ownerType: String, ownerId: Long): Flow<List<Attachment>>
+
+    @Query("DELETE FROM attachments WHERE id = :id")
+    suspend fun deleteAttachment(id: Long)
+
     @Query(
         "SELECT a.* FROM attachments a " +
             "INNER JOIN chat_messages m ON m.id = a.ownerId " +

@@ -30,9 +30,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tend.app.MainViewModel
+import com.tend.app.data.TendRepository
 import com.tend.app.data.db.TaskItem
 import com.tend.app.domain.Time
 import com.tend.app.domain.chat.EntityRef
+import com.tend.app.ui.components.AttachmentsSection
 import com.tend.app.ui.components.CheckCircle
 import com.tend.app.ui.components.DashedAddBox
 import com.tend.app.ui.components.DialogInput
@@ -191,6 +193,7 @@ fun TasksScreen(vm: MainViewModel) {
 
     editing?.let { task ->
         EditTaskDialog(
+            vm = vm,
             task = task,
             today = vm.today,
             onSave = { vm.updateTask(it); editing = null },
@@ -250,6 +253,7 @@ private fun TaskRow(task: TaskItem, today: Long, onToggle: () -> Unit, onEdit: (
 
 @Composable
 private fun EditTaskDialog(
+    vm: MainViewModel,
     task: TaskItem,
     today: Long,
     onSave: (TaskItem) -> Unit,
@@ -320,6 +324,8 @@ private fun EditTaskDialog(
                     TimeStepperRow(dueMin, { dueMin = it })
                     Text("You'll get a notification at this time.", fontSize = 11.sp, color = Faint)
                 }
+
+                AttachmentsSection(vm, TendRepository.OWNER_TASK, task.id)
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     val canSave = title.trim().isNotEmpty()

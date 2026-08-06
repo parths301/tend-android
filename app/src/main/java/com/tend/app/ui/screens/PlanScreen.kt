@@ -35,9 +35,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tend.app.MainViewModel
 import com.tend.app.data.CalEvent
+import com.tend.app.data.TendRepository
 import com.tend.app.data.db.PlanBlock
 import com.tend.app.domain.Time
 import com.tend.app.domain.chat.EntityRef
+import com.tend.app.ui.components.AttachmentsSection
 import com.tend.app.pdf.PlanPdfExporter
 import com.tend.app.ui.components.CheckCircle
 import com.tend.app.ui.components.DialogInput
@@ -257,6 +259,7 @@ fun PlanScreen(vm: MainViewModel) {
 
     if (showAdd) {
         BlockDialog(
+            vm = vm,
             title = "Add block",
             onSave = { blockTitle, start, duration, kind ->
                 vm.addPlanBlock(blockTitle, start, duration, kind)
@@ -268,6 +271,8 @@ fun PlanScreen(vm: MainViewModel) {
 
     editing?.let { block ->
         BlockDialog(
+            vm = vm,
+            ownerId = block.id,
             title = "Edit block",
             initialTitle = block.title,
             initialStart = block.startMin,
@@ -314,10 +319,13 @@ private fun NowLine(nowMin: Int) {
 
 @Composable
 private fun BlockDialog(
+    vm: MainViewModel,
     title: String,
     onSave: (title: String, startMin: Int, durationMin: Int, kind: String) -> Unit,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)? = null,
+    /** The block's real row id — null while adding, since it doesn't exist yet. */
+    ownerId: Long? = null,
     initialTitle: String = "",
     initialStart: Int = 9 * 60,
     initialDuration: Int = 30,
@@ -380,6 +388,10 @@ private fun BlockDialog(
                             )
                         }
                     }
+                }
+
+                if (ownerId != null) {
+                    AttachmentsSection(vm, TendRepository.OWNER_PLAN, ownerId)
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

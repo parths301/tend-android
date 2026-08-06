@@ -1,5 +1,6 @@
 package com.tend.app.data
 
+import com.tend.app.data.db.Attachment
 import com.tend.app.data.db.AppDatabase
 import com.tend.app.data.db.Habit
 import com.tend.app.data.db.HabitLog
@@ -15,6 +16,39 @@ class TendRepository(private val db: AppDatabase) {
     fun tasks(): Flow<List<TaskItem>> = db.taskDao().tasks()
     fun planFor(day: Long): Flow<List<PlanBlock>> = db.planDao().forDay(day)
     fun notesFor(habitId: Long): Flow<List<NoteEntry>> = db.noteDao().forHabit(habitId)
+
+    // ── attachments ─────────────────────────────────────────────
+    //
+    // The same generic table chat messages use — a habit, task or plan block
+    // is just another owner. See ChatRepository.OWNER_MESSAGE for the pattern
+    // this follows.
+
+    fun attachmentsFor(ownerType: String, ownerId: Long): Flow<List<Attachment>> =
+        db.chatDao().attachmentsForOwner(ownerType, ownerId)
+
+    suspend fun addAttachment(ownerType: String, ownerId: Long, uri: String, displayName: String, mime: String, sizeBytes: Long) {
+        db.chatDao().insertAttachments(
+            listOf(
+                Attachment(
+                    ownerType = ownerType,
+                    ownerId = ownerId,
+                    uri = uri,
+                    mime = mime,
+                    displayName = displayName,
+                    sizeBytes = sizeBytes,
+                    createdAt = System.currentTimeMillis(),
+                )
+            )
+        )
+    }
+
+    suspend fun deleteAttachment(id: Long) = db.chatDao().deleteAttachment(id)
+
+    companion object {
+        const val OWNER_HABIT = "habit"
+        const val OWNER_TASK = "task"
+        const val OWNER_PLAN = "plan"
+    }
 
     /**
      * Early builds shipped with seeded demo data. If this database still
@@ -120,16 +154,15 @@ class TendRepository(private val db: AppDatabase) {
         type: String = "check",
         createdDay: Long = 0,
         reminderMin: Int? = null,
+        colorHex: Long? = null,
+        glyph: String? = null,
     ): Long {
-        val palette = listOf(0xFFD96F4E, 0xFF7D74C9, 0xFF2F9C82, 0xFFC9931F)
-        val glyph = name.split(" ").take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }
-            .joinToString("").ifEmpty { "HB" }
         return db.habitDao().insertHabit(
             Habit(
                 name = name,
                 category = category,
-                colorHex = palette[(name.hashCode() and 0x7FFFFFFF) % palette.size],
-                glyph = glyph.take(2),
+                colorHex = colorHex ?: HabitPalette.suggestedColor(name),
+                glyph = (glyph?.takeIf { it.isNotBlank() } ?: HabitPalette.suggestedGlyph(name)).uppercase().take(2),
                 type = type,
                 goal = goal,
                 sortOrder = 99,

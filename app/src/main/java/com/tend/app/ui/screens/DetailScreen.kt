@@ -1,5 +1,7 @@
 package com.tend.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +36,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tend.app.MainViewModel
 import com.tend.app.Tab
+import com.tend.app.data.TendRepository
+import com.tend.app.ui.components.AttachmentsSection
 import com.tend.app.ui.components.Kicker
 import com.tend.app.ui.components.TendCard
 import com.tend.app.ui.components.tapNoRipple
@@ -125,8 +129,10 @@ fun DetailScreen(vm: MainViewModel) {
                 initialType = h.habit.type,
                 initialGoal = h.habit.goal,
                 initialReminderMin = h.habit.reminderMin,
+                initialColorHex = h.habit.colorHex,
+                initialGlyph = h.habit.glyph,
                 saveLabel = "Save",
-                onSave = { name, category, type, goal, reminderMin ->
+                onSave = { name, category, type, goal, reminderMin, colorHex, glyph ->
                     vm.updateHabit(
                         h.habit.copy(
                             name = name.trim(),
@@ -134,6 +140,8 @@ fun DetailScreen(vm: MainViewModel) {
                             type = type,
                             goal = goal.trim().ifEmpty { "Daily" },
                             reminderMin = reminderMin,
+                            colorHex = colorHex,
+                            glyph = glyph,
                         )
                     )
                     showEdit = false
@@ -206,6 +214,8 @@ fun DetailScreen(vm: MainViewModel) {
                 }
             }
         }
+
+        AttachmentsSection(vm, ownerType = TendRepository.OWNER_HABIT, ownerId = h.habit.id)
 
         // Danger zone — two taps to delete, history and notes included
         var confirmDelete by remember { mutableStateOf(false) }

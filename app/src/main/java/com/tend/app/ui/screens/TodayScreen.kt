@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +35,7 @@ import com.tend.app.HabitUi
 import com.tend.app.HabitView
 import com.tend.app.MainViewModel
 import com.tend.app.Tab
+import com.tend.app.data.HabitPalette
 import com.tend.app.domain.Time
 import com.tend.app.ui.components.CategoryPicker
 import com.tend.app.ui.components.CheckCircle
@@ -163,8 +165,8 @@ fun TodayScreen(vm: MainViewModel) {
                 title = "New habit",
                 customs = customs,
                 onAddCustom = vm::addCustomCategory,
-                onSave = { name, category, type, goal, reminderMin ->
-                    vm.addHabit(name, category, type, goal, reminderMin)
+                onSave = { name, category, type, goal, reminderMin, colorHex, glyph ->
+                    vm.addHabit(name, category, type, goal, reminderMin, colorHex, glyph)
                     showNewHabit = false
                 },
                 onDismiss = { showNewHabit = false },
@@ -197,13 +199,15 @@ fun HabitDialog(
     title: String,
     customs: List<String>,
     onAddCustom: (String) -> Unit,
-    onSave: (name: String, category: String, type: String, goal: String, reminderMin: Int?) -> Unit,
+    onSave: (name: String, category: String, type: String, goal: String, reminderMin: Int?, colorHex: Long, glyph: String) -> Unit,
     onDismiss: () -> Unit,
     initialName: String = "",
     initialCategory: String = "Fitness",
     initialType: String = "check",
     initialGoal: String = "",
     initialReminderMin: Int? = null,
+    initialColorHex: Long? = null,
+    initialGlyph: String? = null,
     saveLabel: String = "Create",
 ) {
     var name by rememberSaveable { mutableStateOf(initialName) }
@@ -212,6 +216,8 @@ fun HabitDialog(
     var goal by rememberSaveable { mutableStateOf(initialGoal) }
     var reminderOn by rememberSaveable { mutableStateOf(initialReminderMin != null) }
     var reminderMin by rememberSaveable { mutableStateOf(initialReminderMin ?: 8 * 60) }
+    var colorHex by rememberSaveable { mutableStateOf(initialColorHex ?: HabitPalette.suggestedColor(initialName)) }
+    var glyph by rememberSaveable { mutableStateOf(initialGlyph ?: HabitPalette.suggestedGlyph(initialName)) }
 
     Dialog(onDismissRequest = onDismiss) {
         TendCard(Modifier.fillMaxWidth()) {
@@ -237,6 +243,23 @@ fun HabitDialog(
 
                 DialogLabel("Goal (optional)")
                 DialogInput(goal, { goal = it }, if (type == "time") "e.g. 2h · weekdays" else "e.g. Daily · 8:00 AM")
+
+                DialogLabel("Color")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HabitPalette.COLORS.forEach { hex ->
+                        val selected = hex == colorHex
+                        Box(
+                            Modifier
+                                .size(28.dp)
+                                .background(Color(hex), CircleShape)
+                                .then(if (selected) Modifier.border(2.dp, Ink, CircleShape) else Modifier)
+                                .tapNoRipple(TendHaptic.Select) { colorHex = hex },
+                        )
+                    }
+                }
+
+                DialogLabel("Badge letters")
+                DialogInput(glyph, { glyph = it.uppercase().take(2) }, "e.g. MR")
 
                 Row(
                     Modifier.fillMaxWidth(),
@@ -278,7 +301,10 @@ fun HabitDialog(
                             .background(if (canSave) Ink else Disabled, RoundedCornerShape(99.dp))
                             .bouncyTap(haptic = if (canSave) TendHaptic.Confirm else TendHaptic.Reject) {
                                 if (canSave) {
-                                    onSave(name, category, type, goal, if (reminderOn) reminderMin else null)
+                                    onSave(
+                                        name, category, type, goal, if (reminderOn) reminderMin else null,
+                                        colorHex, glyph.ifBlank { HabitPalette.suggestedGlyph(name) },
+                                    )
                                 } else {
                                     rejectTick++
                                 }
