@@ -167,8 +167,10 @@ data class MemoryEntry(
 
 /**
  * A file or image attached to something. `ownerType`/`ownerId` rather than a
- * foreign key so chat messages, memory entries and habits can all share one
- * table and one rendering primitive.
+ * foreign key so chat messages, habits, tasks and plan blocks can all share
+ * one table and one rendering primitive. (Memory has its own storage — see
+ * `MemoryEntry.blobPath` — because its bytes are sealed under the vault's
+ * data key rather than left as an ordinary SAF reference.)
  */
 @Entity(
     tableName = "attachments",
@@ -176,7 +178,7 @@ data class MemoryEntry(
 )
 data class Attachment(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val ownerType: String,        // "message" | "memory"
+    val ownerType: String,        // "message" | "habit" | "task" | "plan"
     val ownerId: Long,
     val uri: String,              // SAF content:// URI, persisted permission taken
     val mime: String,

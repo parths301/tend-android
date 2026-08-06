@@ -1,11 +1,13 @@
 package com.tend.app
 
+import com.tend.app.data.TendRepository
 import com.tend.app.data.backup.BackupFormat
 import com.tend.app.data.backup.BackupFormatException
 import com.tend.app.data.backup.BackupMemoryEntry
 import com.tend.app.data.backup.BackupSettings
 import com.tend.app.data.backup.BackupSnapshot
 import com.tend.app.data.backup.BackupVaultKeyMaterial
+import com.tend.app.data.db.Attachment
 import com.tend.app.data.db.ChatMessage
 import com.tend.app.data.db.ChatThread
 import com.tend.app.data.db.Habit
@@ -71,6 +73,72 @@ class BackupFormatTest {
             MessageLink(id = 70, messageId = 61, entityType = "task", entityId = 20, label = "Buy groceries", createdAt = 2L),
         ),
     )
+
+    private fun withAttachments(): BackupSnapshot = withChat().copy(
+        attachments = listOf(
+            Attachment(
+                id = 90, ownerType = TendRepository.OWNER_HABIT, ownerId = 1, uri = "content://x/habit.pdf",
+                mime = "application/pdf", displayName = "habit.pdf", sizeBytes = 1024, createdAt = 1L,
+            ),
+            Attachment(
+                id = 91, ownerType = TendRepository.OWNER_TASK, ownerId = 20, uri = "content://x/task.jpg",
+                mime = "image/jpeg", displayName = "task.jpg", sizeBytes = 2048, createdAt = 2L,
+            ),
+            Attachment(
+                id = 92, ownerType = TendRepository.OWNER_PLAN, ownerId = 30, uri = "content://x/plan.png",
+                mime = "image/png", displayName = "plan.png", sizeBytes = 512, createdAt = 3L,
+            ),
+            Attachment(
+                id = 93, ownerType = "message", ownerId = 61, uri = "content://x/msg.txt",
+                mime = "text/plain", displayName = "msg.txt", sizeBytes = 10, createdAt = 4L,
+            ),
+        ),
+    )
+
+    @Test
+    fun `round trips attachments for habits, tasks, plans and messages`() {
+        val decoded = BackupFormat.decode(BackupFormat.encode(withAttachments()))
+
+        assertEquals(4, decoded.attachments.size)
+        val byOwnerType = decoded.attachments.associateBy { it.ownerType }
+        assertEquals(1L, byOwnerType.getValue(TendRepository.OWNER_HABIT).ownerId)
+        assertEquals("habit.pdf", byOwnerType.getValue(TendRepository.OWNER_HABIT).displayName)
+        assertEquals(20L, byOwnerType.getValue(TendRepository.OWNER_TASK).ownerId)
+        assertEquals(30L, byOwnerType.getValue(TendRepository.OWNER_PLAN).ownerId)
+        assertEquals(61L, byOwnerType.getValue("message").ownerId)
+        assertEquals(2048L, byOwnerType.getValue(TendRepository.OWNER_TASK).sizeBytes)
+    }
+
+    @Test
+    fun `flags attachments whose owner no longer exists`() {
+        val orphaned = withAttachments().copy(habits = emptyList(), logs = emptyList(), notes = emptyList())
+        val problems = BackupFormat.problems(orphaned)
+        assertTrue(problems.any { it.contains("attachment") && it.contains("missing item") })
+    }
+
+    @Test
+    fun `sanitize drops attachments whose owner is gone and keeps the rest`() {
+        val damaged = withAttachments().copy(tasks = emptyList())
+        val clean = BackupFormat.sanitize(damaged)
+        // The task attachment is dropped; habit, plan and message attachments survive.
+        assertEquals(3, clean.attachments.size)
+        assertTrue(clean.attachments.none { it.ownerType == TendRepository.OWNER_TASK })
+    }
+
+    @Test
+    fun `sanitize drops duplicate attachment ids`() {
+        val dupes = withAttachments().let { it.copy(attachments = it.attachments + it.attachments[0]) }
+        val clean = BackupFormat.sanitize(dupes)
+        assertEquals(4, clean.attachments.size)
+    }
+
+    @Test
+    fun `a pre-v4 file has no attachments rather than failing`() {
+        val v3 = BackupFormat.encode(sample())
+            .replace("\"version\": ${BackupFormat.VERSION}", "\"version\": 3")
+        val decoded = BackupFormat.decode(v3)
+        assertTrue(decoded.attachments.isEmpty())
+    }
 
     private fun withMemory(): BackupSnapshot = sample().copy(
         memoryEntries = listOf(

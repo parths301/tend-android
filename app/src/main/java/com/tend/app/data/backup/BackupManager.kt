@@ -99,6 +99,7 @@ object BackupManager {
             threads = db.chatDao().threadsOnce(),
             messages = db.chatDao().allMessagesOnce(),
             links = db.chatDao().allLinksOnce(),
+            attachments = db.chatDao().allAttachmentsOnce(),
             memoryEntries = memoryEntries,
             vaultKeyMaterial = vaultKeyMaterial,
         )
@@ -255,8 +256,10 @@ object BackupManager {
         val db = AppDatabase.get(context)
 
         db.withTransaction {
-            // Attachments and chat first: messages cascade from threads, so the
-            // rows must go before the tables they point at are rebuilt.
+            // Clear first: attachments point at every other table here (a
+            // habit, task, plan block or message), so it has to go before all
+            // of them are rebuilt, and come back only once every owner it
+            // could reference exists again.
             db.chatDao().clearAttachments()
             db.chatDao().clearThreads()
             db.noteDao().clearNotes()
@@ -273,6 +276,7 @@ object BackupManager {
             db.chatDao().insertThreads(clean.threads)
             db.chatDao().insertMessages(clean.messages)
             db.chatDao().insertLinks(clean.links)
+            db.chatDao().insertAttachments(clean.attachments)
         }
 
         clean.settings?.let { SettingsRepository(context).applySnapshot(it) }

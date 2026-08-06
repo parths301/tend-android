@@ -1,5 +1,6 @@
 package com.tend.app.data.backup
 
+import com.tend.app.data.db.Attachment
 import com.tend.app.data.db.ChatMessage
 import com.tend.app.data.db.ChatThread
 import com.tend.app.data.db.Habit
@@ -71,6 +72,15 @@ data class BackupSnapshot(
     val threads: List<ChatThread> = emptyList(),
     val messages: List<ChatMessage> = emptyList(),
     val links: List<MessageLink> = emptyList(),
+    /**
+     * Files/images attached to a chat message, habit, task or plan block —
+     * one table shared by all four, per [Attachment]'s `ownerType`. The URI
+     * itself isn't inlined (same reasoning as chat's own doc comment below):
+     * it's a SAF `content://` reference with a persisted permission grant,
+     * which a restore re-resolves rather than a backup ever needing to copy
+     * the bytes.
+     */
+    val attachments: List<Attachment> = emptyList(),
     val memoryEntries: List<BackupMemoryEntry> = emptyList(),
     val vaultKeyMaterial: BackupVaultKeyMaterial? = null,
     /**
@@ -84,7 +94,7 @@ data class BackupSnapshot(
 ) {
     val rowCount: Int
         get() = habits.size + logs.size + tasks.size + plans.size + notes.size +
-            threads.size + messages.size + memoryEntries.size
+            threads.size + messages.size + attachments.size + memoryEntries.size
 }
 
 class BackupFormatException(message: String) : Exception(message)
@@ -102,13 +112,16 @@ object BackupFormat {
     const val FORMAT = "tend-backup"
 
     /**
-     * v3 adds Memory vault entries and the key material that unlocks them.
-     * v2 added chat threads, messages and entity links.
+     * v4 adds the shared attachments table (chat messages, habits, tasks and
+     * plan blocks all point into it). v3 added Memory vault entries and the
+     * key material that unlocks them. v2 added chat threads, messages and
+     * entity links.
      *
-     * Readers still accept v1 and v2 — the newer sections are simply absent and
-     * default to empty/null — so an older backup restores unchanged.
+     * Readers still accept v1 through v3 — the newer sections are simply
+     * absent and default to empty/null — so an older backup restores
+     * unchanged.
      */
-    const val VERSION = 3
+    const val VERSION = 4
     const val MIME = "application/json"
     const val FILE_PREFIX = "tend-backup-"
     const val FILE_SUFFIX = ".json"
@@ -130,6 +143,7 @@ object BackupFormat {
                 .put("notes", snapshot.notes.size)
                 .put("chatThreads", snapshot.threads.size)
                 .put("chatMessages", snapshot.messages.size)
+                .put("attachments", snapshot.attachments.size)
                 .put("memoryEntries", snapshot.memoryEntries.size),
         )
 
@@ -197,9 +211,6 @@ object BackupFormat {
             },
         )
 
-        // Chat. Attachments are referenced by content:// URI and live outside the
-        // app, so they are deliberately not inlined here — a backup stays a
-        // readable text file rather than a container of encoded blobs.
         root.put(
             "chatThreads",
             snapshot.threads.jsonArray {
@@ -235,6 +246,25 @@ object BackupFormat {
                 put("entityType", it.entityType)
                 put("entityId", it.entityId)
                 put("label", it.label)
+                put("createdAt", it.createdAt)
+            },
+        )
+
+        // Attachments — for chat messages, habits, tasks and plan blocks alike.
+        // Only the URI travels, not the bytes behind it: it's a SAF content://
+        // reference with a permission grant that survives independently of
+        // this file, so copying the bytes here would just be a second, staler
+        // copy of something the OS already keeps.
+        root.put(
+            "attachments",
+            snapshot.attachments.jsonArray {
+                put("id", it.id)
+                put("ownerType", it.ownerType)
+                put("ownerId", it.ownerId)
+                put("uri", it.uri)
+                put("mime", it.mime)
+                put("displayName", it.displayName)
+                put("sizeBytes", it.sizeBytes)
                 put("createdAt", it.createdAt)
             },
         )
@@ -405,6 +435,19 @@ object BackupFormat {
                     createdAt = it.optLong("createdAt", 0L),
                 )
             },
+            // Absent before v4; `rows` yields an empty list, which is correct.
+            attachments = root.rows("attachments") {
+                Attachment(
+                    id = it.getLong("id"),
+                    ownerType = it.optString("ownerType", ""),
+                    ownerId = it.getLong("ownerId"),
+                    uri = it.optString("uri", ""),
+                    mime = it.optString("mime", ""),
+                    displayName = it.optString("displayName", ""),
+                    sizeBytes = it.optLong("sizeBytes", 0L),
+                    createdAt = it.optLong("createdAt", 0L),
+                )
+            },
             // Absent before v3; `rows` yields an empty list, which is correct.
             memoryEntries = root.rows("memoryEntries") {
                 BackupMemoryEntry(
@@ -466,7 +509,31 @@ object BackupFormat {
             problems += "${snapshot.memoryEntries.size} Memory item${plural(snapshot.memoryEntries.size)} " +
                 "have no vault key material and won't be unlockable after restore"
         }
+        val taskIds = snapshot.tasks.map { it.id }.toSet()
+        val planIds = snapshot.plans.map { it.id }.toSet()
+        val messageIds = snapshot.messages.map { it.id }.toSet()
+        val orphanAttachments = snapshot.attachments.count { !it.hasOwnerIn(habitIds, taskIds, planIds, messageIds) }
+        if (orphanAttachments > 0) {
+            problems += "$orphanAttachments attachment${plural(orphanAttachments)} reference a missing item"
+        }
         return problems
+    }
+
+    /** Whether an attachment's owner is present in the id set for its [Attachment.ownerType]. */
+    private fun Attachment.hasOwnerIn(
+        habitIds: Set<Long>,
+        taskIds: Set<Long>,
+        planIds: Set<Long>,
+        messageIds: Set<Long>,
+    ): Boolean = when (ownerType) {
+        "habit" -> ownerId in habitIds
+        "task" -> ownerId in taskIds
+        "plan" -> ownerId in planIds
+        "message" -> ownerId in messageIds
+        // An unrecognised owner type (a future kind an older reader doesn't
+        // know, or historical "memory") can't be checked, so it isn't flagged
+        // as broken — only as something restore will carry through as-is.
+        else -> true
     }
 
     /**
@@ -494,14 +561,19 @@ object BackupFormat {
             .filter { it.threadId in threadIds }
         val messageIds = messages.map { it.id }.toSet()
 
+        val tasks = snapshot.tasks.distinctBy { it.id }
+        val plans = snapshot.plans.distinctBy { it.id }
+        val taskIds = tasks.map { it.id }.toSet()
+        val planIds = plans.map { it.id }.toSet()
+
         return snapshot.copy(
             habits = habits,
             logs = snapshot.logs
                 .filter { it.habitId in habitIds }
                 .distinctBy { it.habitId to it.epochDay }
                 .map { it.copy(id = 0) },
-            tasks = snapshot.tasks.distinctBy { it.id },
-            plans = snapshot.plans.distinctBy { it.id },
+            tasks = tasks,
+            plans = plans,
             notes = snapshot.notes.filter { it.habitId in habitIds }.map { it.copy(id = 0) },
             threads = threads,
             messages = messages,
@@ -509,6 +581,12 @@ object BackupFormat {
             // whose *entity* is gone is kept on purpose — that is the deleted-item
             // case the chat is designed to report.
             links = snapshot.links.filter { it.messageId in messageIds },
+            // Same idea as links: an attachment whose owner is gone has nothing
+            // to hang off of, but an unrecognised ownerType is kept rather than
+            // guessed at.
+            attachments = snapshot.attachments
+                .distinctBy { it.id }
+                .filter { it.hasOwnerIn(habitIds, taskIds, planIds, messageIds) },
             memoryEntries = snapshot.memoryEntries.distinctBy { it.id },
         )
     }
