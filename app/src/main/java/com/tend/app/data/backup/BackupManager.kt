@@ -289,7 +289,8 @@ object BackupManager {
             // Rows and blob files aren't part of the transaction above — like
             // the vault's own destroyEverything(), the filesystem side of this
             // was never transactional — but the same clear-then-insert shape.
-            val memoryRepo = MemoryRepository(context, db, VaultSession(context))
+            val vaultSession = VaultSession(context)
+            val memoryRepo = MemoryRepository(context, db, vaultSession)
             val blobs = clean.memoryEntries
                 .filter { it.blobPath.isNotEmpty() && it.sealedBlobBase64.isNotEmpty() }
                 .associate { it.blobPath to VaultCrypto.decode(it.sealedBlobBase64) }
@@ -298,7 +299,7 @@ object BackupManager {
                 blobs = blobs,
             )
             clean.vaultKeyMaterial?.let { m ->
-                VaultSession(context).importKeyMaterial(
+                vaultSession.importKeyMaterial(
                     VaultKeyMaterial(
                         saltPassword = m.saltPassword,
                         saltRecovery = m.saltRecovery,

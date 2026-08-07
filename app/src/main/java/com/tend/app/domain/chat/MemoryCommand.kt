@@ -39,7 +39,9 @@ sealed interface MemoryCommand {
             Regex("""(?i)^\s*(?:keep|store)\s+(?:this\s+)?(?:in|to)\s+(?:my\s+)?memory[:,;]?\s*(.*)$""", ALL)
 
 
-        private val rememberRegex = Regex("""(?i)^\s*(?:please\s+)?remember\s+(?:that\s+)?(.+)$""", ALL)
+        // Excludes "remember to <do something>" — that's a reminder/task request,
+        // not a note to save, and must fall through to the AI instead.
+        private val rememberRegex = Regex("""(?i)^\s*(?:please\s+)?remember\s+(?:that\s+)?(?!to\b)(.+)$""", ALL)
 
         private val bareRegex = Regex("""(?i)^\s*memory[:,;]?\s*(.*)$""", ALL)
 
@@ -58,6 +60,10 @@ sealed interface MemoryCommand {
             keepStorePrefixRegex.find(input)?.let { return Add(cleanText(it.groupValues[1])) }
             bareRegex.find(input)?.let {
                 val text = cleanText(it.groupValues[1])
+                // A bare "memory" prefix followed by a question — "memory foam
+                // pillow recommendations?" — is ordinary chat, not an instruction;
+                // only a genuine label/note or an empty remainder is a command.
+                if (text.endsWith("?")) return@let
                 return if (text.isBlank()) Search("") else Add(text)
             }
             return null

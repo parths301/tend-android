@@ -42,13 +42,24 @@ class AiExecutionRouter(
             when (action) {
                 is AiAction.AddTask -> AiProtocol.isSensitive(action.title)
                 is AiAction.AddPlanBlock -> AiProtocol.isSensitive(action.title)
-                is AiAction.AddHabit -> AiProtocol.isSensitive(action.name)
+                is AiAction.AddHabit -> AiProtocol.isSensitive(action.name) || AiProtocol.isSensitive(action.goal)
             }
+        }
+
+        // The model's own prose can echo back a secret it was just asked not to
+        // save as plaintext (e.g. confirming a card number back to the user);
+        // redact the reply the same way a sensitive input already is.
+        val safeReply = if (AiProtocol.isSensitive(response.reply)) {
+            "This message contains sensitive information (ID, card, or credentials). " +
+                "To protect your privacy, Tend will not store it as plaintext chat history. " +
+                "Use the encrypted Memory Vault to store sensitive items safely."
+        } else {
+            response.reply
         }
 
         // Apply first, then link: an EntityRef is only honest once the row exists.
         val links = safeActions.mapNotNull { applier.apply(it) }
-        return response.copy(actions = safeActions, links = links)
+        return response.copy(reply = safeReply, actions = safeActions, links = links)
     }
 
 

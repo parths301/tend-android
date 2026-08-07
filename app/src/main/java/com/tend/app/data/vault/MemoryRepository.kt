@@ -2,6 +2,7 @@ package com.tend.app.data.vault
 
 import android.content.Context
 import android.net.Uri
+import androidx.room.withTransaction
 import com.tend.app.data.db.AppDatabase
 import com.tend.app.data.db.MemoryEntry
 import kotlinx.coroutines.Dispatchers
@@ -252,10 +253,18 @@ class MemoryRepository(
     /** Replaces every entry and blob with what a backup captured. */
     suspend fun restoreFromBackup(entries: List<MemoryEntry>, blobs: Map<String, ByteArray>) =
         withContext(Dispatchers.IO) {
-            dao.clear()
-            vaultDir.listFiles()?.forEach { it.delete() }
-            if (entries.isNotEmpty()) dao.insertAll(entries)
+            // Blob names are UUID-based, so writing the new set can never collide
+            // with what is already on disk. Doing this before anything old is
+            // touched means a write failure here (disk full, a bad backup entry)
+            // leaves the current vault exactly as it was.
             blobs.forEach { (path, bytes) -> File(vaultDir, path).writeBytes(bytes) }
+            db.withTransaction {
+                dao.clear()
+                if (entries.isNotEmpty()) dao.insertAll(entries)
+            }
+            // Only now drop the old blobs — the DB side already committed, so
+            // there is nothing left referencing them.
+            vaultDir.listFiles()?.forEach { if (it.name !in blobs.keys) it.delete() }
         }
 
     private fun decrypt(entry: MemoryEntry, key: SecretKey): MemoryItem? {
