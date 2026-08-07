@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -182,7 +183,8 @@ private fun humanSize(bytes: Long): String = when {
  */
 @Composable
 fun AttachmentsSection(vm: MainViewModel, ownerType: String, ownerId: Long) {
-    val attachments by vm.attachmentsFor(ownerType, ownerId).collectAsStateWithLifecycle(initialValue = emptyList())
+    val flow = remember(ownerType, ownerId) { vm.attachmentsFor(ownerType, ownerId) }
+    val attachments by flow.collectAsStateWithLifecycle(initialValue = emptyList())
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { vm.addOwnerAttachment(ownerType, ownerId, it) }
     }
