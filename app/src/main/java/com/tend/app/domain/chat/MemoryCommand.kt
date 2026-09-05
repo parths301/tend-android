@@ -44,6 +44,8 @@ sealed interface MemoryCommand {
         private val rememberRegex = Regex("""(?i)^\s*(?:please\s+)?remember\s+(?:that\s+)?(?!to\b)(.+)$""", ALL)
 
         private val bareRegex = Regex("""(?i)^\s*memory[:,;]?\s*(.*)$""", ALL)
+        private val WHITESPACE = Regex("""\s+""")
+        private const val MAX_BARE_WORDS = 6
 
         private fun cleanText(text: String): String = text.trim().trimStart(',', ':', ';', '.', '-').trim()
 
@@ -60,10 +62,13 @@ sealed interface MemoryCommand {
             keepStorePrefixRegex.find(input)?.let { return Add(cleanText(it.groupValues[1])) }
             bareRegex.find(input)?.let {
                 val text = cleanText(it.groupValues[1])
-                // A bare "memory" prefix followed by a question — "memory foam
-                // pillow recommendations?" — is ordinary chat, not an instruction;
-                // only a genuine label/note or an empty remainder is a command.
-                if (text.endsWith("?")) return@let
+                // A bare "memory" prefix reads as a command only for a short
+                // label/value ("memory aadhaar number"); a question ("memory
+                // foam pillow recommendations?") or a longer run-on sentence
+                // ("Memory foam pillows are so much better than the old one")
+                // is ordinary chat that happens to start with the word.
+                val looksLikeSentence = text.endsWith("?") || text.split(WHITESPACE).size > MAX_BARE_WORDS
+                if (looksLikeSentence) return@let
                 return if (text.isBlank()) Search("") else Add(text)
             }
             return null

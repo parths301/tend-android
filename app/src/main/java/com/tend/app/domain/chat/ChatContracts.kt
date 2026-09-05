@@ -51,6 +51,8 @@ enum class ResponseSource(val stored: String) {
     Cloud("cloud"),
     Local("local"),
     System("system"),
+    /** A Memory-vault command's own reply — never real AI/local output, and never allowed into a request's context. */
+    Vault("vault"),
     ;
 
     companion object {

@@ -4,6 +4,7 @@ import com.tend.app.data.db.ChatMessage
 import com.tend.app.domain.chat.AiExecutionRouter
 import com.tend.app.domain.chat.ChatMode
 import com.tend.app.domain.chat.MemoryCommand
+import com.tend.app.domain.chat.ResponseSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -118,6 +119,8 @@ class MemoryIsolationTest {
             "add a task to back up my memories",
             "how much memory does this app use?",
             "gym at 6pm",
+            "Memory foam pillows are so much better than the old one",
+            "remember to pick up dry cleaning at 6pm",
         ).forEach { assertNull("Wrongly treated as a command: $it", MemoryCommand.parse(it)) }
     }
 
@@ -152,6 +155,38 @@ class MemoryIsolationTest {
         assertFalse(
             "Nothing in a request may originate outside chat history and app state",
             everythingSent.contains("spare key"),
+        )
+    }
+
+    @Test
+    fun `a vault reply earlier in the thread never reaches a later request's context`() {
+        // A memory search's own reply can hold decrypted vault titles. It is
+        // never sent in the *same* turn (parse() intercepts it before a request
+        // is built) — but nothing stopped it from riding along as ordinary
+        // history on the *next*, unrelated AI turn in the same thread.
+        val history = listOf(
+            message(1, "search memory for bank pin"),
+            ChatMessage(
+                id = 2, threadId = 1, fromAi = true,
+                text = "1 match in Memory: Bank PIN. Open Settings -> Memory to view them.",
+                createdAt = 2, source = ResponseSource.Vault.stored,
+            ),
+        )
+        val request = AiExecutionRouter.buildRequest(
+            threadId = 1,
+            selectedMode = ChatMode.Ai,
+            hasKey = true,
+            history = history,
+            userMessage = "what's on today?",
+            stateSummary = "Habits: gym",
+        )
+        assertTrue(
+            "A Memory-vault reply must never enter a later request's context",
+            request.contextMessages.none { it.source == ResponseSource.Vault.stored },
+        )
+        assertTrue(
+            "Nothing in a request may contain a vault title",
+            request.contextMessages.none { it.text.contains("Bank PIN") },
         )
     }
 

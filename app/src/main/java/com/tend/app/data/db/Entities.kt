@@ -97,7 +97,7 @@ data class ChatMessage(
     val fromAi: Boolean,
     val text: String,
     val createdAt: Long,
-    val source: String,           // ResponseSource.stored — "cloud" | "local" | "system"
+    val source: String,           // ResponseSource.stored — "cloud" | "local" | "system" | "vault"
     val modelId: String? = null,  // what actually answered, for the "AI" tag
     /** Manually marked "add to AI context" — only meaningful for Local Mode. */
     val inContext: Boolean = false,

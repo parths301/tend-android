@@ -90,12 +90,16 @@ class AiExecutionRouter(
                 ChatMode.Ai -> ChatContextPolicy.FullHistory(historyWindow)
                 ChatMode.Local -> ChatContextPolicy.SelectedOnly
             }
+            // A Memory-vault reply can hold decrypted vault titles; filtering it
+            // out here, before any policy runs, means no policy — present or
+            // future — can let vault content back into a request's context.
+            val safeHistory = history.filterNot { it.source == ResponseSource.Vault.stored }
             return AssistantRequest(
                 threadId = threadId,
                 mode = mode,
                 policy = policy,
                 userMessage = userMessage,
-                contextMessages = policy.selectContext(history),
+                contextMessages = policy.selectContext(safeHistory),
                 // Offline mode never sends anything anywhere, so a state summary
                 // would be pointless work; it is also one less thing to leak if
                 // a future local model is ever swapped in.

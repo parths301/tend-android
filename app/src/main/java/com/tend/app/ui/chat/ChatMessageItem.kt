@@ -58,7 +58,7 @@ fun ChatMessageItem(
     onLongPress: () -> Unit,
     onLinkClick: (EntityRef) -> Unit,
 ) {
-    val generated = msg.fromAi && msg.source != ResponseSource.System
+    val generated = msg.fromAi && msg.source != ResponseSource.System && msg.source != ResponseSource.Vault
     val shape = if (msg.fromAi) {
         RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp)
     } else {
@@ -147,6 +147,7 @@ private val ResponseSource.tagLabel: String
         ResponseSource.Cloud -> "AI"
         ResponseSource.Local -> "OFFLINE"
         ResponseSource.System -> ""
+        ResponseSource.Vault -> ""
     }
 
 /**

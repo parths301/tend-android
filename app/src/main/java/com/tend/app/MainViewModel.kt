@@ -744,7 +744,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
                 val (reply, blocks) = parsed
+                // A task/habit title the model echoed into a block title, or a
+                // secret it worked into its own summary, must not become a
+                // permanent plaintext row or a message the user sees — same
+                // guard AiExecutionRouter applies to ordinary chat actions.
                 val safe = AiProtocol.filterOverlaps(blocks, busy)
+                    .filterNot { AiProtocol.isSensitive(it.title) }
+                val safeReply = if (AiProtocol.isSensitive(reply)) {
+                    "Auto-plan finished, but its summary mentioned sensitive information (ID, card, or " +
+                        "credentials), so it wasn't shown. Use the encrypted Memory Vault to store " +
+                        "sensitive items safely."
+                } else {
+                    reply
+                }
                 repo.replaceAutoPlan(
                     day,
                     safe.map {
@@ -758,7 +770,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     },
                 )
-                autoPlanMessageState.value = AutoPlanMessage(reply, failed = false)
+                autoPlanMessageState.value = AutoPlanMessage(safeReply, failed = false)
             } catch (e: Exception) {
                 autoPlanMessageState.value =
                     AutoPlanMessage("Auto-plan failed: ${e.message?.take(100) ?: "network error"}", failed = true)
@@ -1103,7 +1115,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         threadId = threadId,
                         fromAi = true,
                         text = runMemoryCommand(command, capturedAttachments),
-                        source = ResponseSource.System,
+                        // Not System: a vault reply can hold decrypted titles, and
+                        // this source is what AiExecutionRouter filters out of
+                        // every future request's context in this thread.
+                        source = ResponseSource.Vault,
                     )
                     return@launch
                 }
@@ -1439,13 +1454,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             is MemoryCommand.Search -> {
                 val hits = memoryRepo.search(command.query)
                 memoryResultsState.value = hits
+                // Titles are decrypted vault content: naming them here would
+                // persist them in plaintext chat history (and in a backup file),
+                // exactly what the vault exists to avoid. A count is enough to
+                // confirm the search worked; the titles are one tap away.
                 when {
                     hits.isEmpty() && command.query.isBlank() -> "Memory is empty."
                     hits.isEmpty() -> "Nothing in Memory matches \"${command.query}\"."
-                    else -> "${hits.size} match${if (hits.size == 1) "" else "es"} in Memory: " +
-                        hits.take(5).joinToString(", ") { it.title } +
-                        (if (hits.size > 5) ", …" else "") +
-                        ". Open Settings → Memory to view them."
+                    else -> "${hits.size} match${if (hits.size == 1) "" else "es"} in Memory. " +
+                        "Open Settings → Memory to view them."
                 }
             }
         }
